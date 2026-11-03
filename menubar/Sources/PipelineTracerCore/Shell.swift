@@ -1,7 +1,7 @@
 import Foundation
 
 /// Runs a command and returns (exit status, stdout). Uses PATH that includes Homebrew,
-/// because `glab` and `git` live there and menubar apps inherit a minimal PATH.
+/// because `glab`, `gh`, and `git` live there and menubar apps inherit a minimal PATH.
 enum Shell {
     static let env: [String: String] = {
         var e = ProcessInfo.processInfo.environment
@@ -43,5 +43,36 @@ enum Shell {
               let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
         if root["errors"] != nil { return nil }
         return root["data"] as? [String: Any]
+    }
+
+    /// `gh api graphql --hostname github.com` data object, or nil on failure.
+    static func ghGraphQL(_ query: String) -> [String: Any]? {
+        let r = run(["gh", "api", "graphql", "--hostname", "github.com", "-f", "query=\(query)"])
+        guard r.status == 0, let d = r.out.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        if root["errors"] != nil { return nil }
+        return root["data"] as? [String: Any]
+    }
+
+    /// `gh api --hostname github.com <path>` parsed as JSON. `404` is a missing repo or disabled Actions, not a transport failure.
+    static func ghGET(_ path: String) -> (status: Int32, json: Any?) {
+        let r = run(["gh", "api", "--hostname", "github.com", path])
+        guard let d = r.out.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: d) else { return (r.status == 0 ? -1 : r.status, nil) }
+        if r.status != 0 {
+            let message = (json as? [String: Any])?["message"] as? String
+            if message == "Not Found" { return (404, nil) }
+            return (r.status, nil)
+        }
+        return (0, json)
+    }
+
+    /// Opens only https://gitlab.com and https://github.com links that came back from the API.
+    static func browserURL(_ value: String) -> URL? {
+        guard let url = URL(string: value),
+              url.scheme == "https",
+              url.user == nil,
+              url.host == "gitlab.com" || url.host == "github.com" else { return nil }
+        return url
     }
 }

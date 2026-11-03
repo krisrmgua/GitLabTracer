@@ -26,7 +26,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
     public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         guard response.actionIdentifier != UNNotificationDismissActionIdentifier else { completionHandler(); return }
         if let value = response.notification.request.content.userInfo["url"] as? String,
-           let url = URL(string: value), url.scheme == "https", url.host == "gitlab.com" {
+           let url = Shell.browserURL(value) {
             NSWorkspace.shared.open(url)
         }
         completionHandler()

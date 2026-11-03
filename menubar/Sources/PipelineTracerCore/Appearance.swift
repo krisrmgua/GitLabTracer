@@ -1,26 +1,26 @@
 import AppKit
 
-/// GitLab behavior preferences saved in UserDefaults.
+/// Saved preferences for the panel, GitLab, and GitHub Actions.
 enum PipelineTracerPrefs {
-    private static let gitlabRefreshKey = "pipelinetracer.gitlabRefreshSeconds"
+    private static let refreshKey = "pipelinetracer.refreshSeconds"
     private static let pipelineHoursKey = "pipelinetracer.pipelineHours"
     private static let mergeButtonKey = "pipelinetracer.mergeButton"
     private static let rememberPlaceKey = "pipelinetracer.rememberPlace"
 
-    static let gitlabRefreshChoices = [10, 20, 30, 40, 50, 60]
+    static let refreshChoices = [10, 20, 30, 40, 50, 60]
     static let pipelineHourChoices = [1, 2, 4, 6, 8, 12, 24]
 
-    /// Seconds between GitLab refreshes.
-    static var gitlabRefreshSeconds: Int {
-        get { int(gitlabRefreshKey, 60, gitlabRefreshChoices) }
-        set { UserDefaults.standard.set(newValue, forKey: gitlabRefreshKey) }
+    /// Seconds between refreshes.
+    static var refreshSeconds: Int {
+        get { int(refreshKey, 60, refreshChoices) }
+        set { UserDefaults.standard.set(newValue, forKey: refreshKey) }
     }
     /// How far back finished pipelines are listed, in hours.
     static var pipelineHours: Int {
         get { int(pipelineHoursKey, 2, pipelineHourChoices) }
         set { UserDefaults.standard.set(newValue, forKey: pipelineHoursKey) }
     }
-    /// Shows Merge on ready merge requests (asks to confirm). On by default; turn off under Options › GitLab.
+    /// Shows Merge on ready GitLab merge requests and GitHub pull requests (asks to confirm). On by default.
     static var mergeButton: Bool {
         get { bool(mergeButtonKey, true) }
         set { UserDefaults.standard.set(newValue, forKey: mergeButtonKey) }
