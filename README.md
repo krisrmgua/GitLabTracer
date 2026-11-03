@@ -125,6 +125,7 @@ cd GitLabTracer
 2. stops any running copy, including the old Swift build
 3. copies the app to `~/Applications/Pipeline Tracer.app`
 4. writes the LaunchAgent `~/Library/LaunchAgents/com.kris.pipelinetracer.plist` and starts it, so the app also opens at login
+5. writes a helper, `~/bin/pipeline-tracer start|stop|status` (put `~/bin` on your `PATH` to use it)
 
 Run it again to update. The bundle id is `com.kris.pipelinetracer`.
 
