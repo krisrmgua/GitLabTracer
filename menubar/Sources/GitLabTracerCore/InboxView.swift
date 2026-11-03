@@ -134,13 +134,43 @@ private struct InboxChromeHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value += nextValue() }
 }
 
+/// Stage columns stay as wide as their names. Links between them grow when the
+/// row has room, and stay short when the row has to scroll.
+private struct StageTrack: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified) }
+        let width = ideals.reduce(0) { $0 + $1.width }
+        let height = ideals.map(\.height).max() ?? 0
+        return CGSize(width: max(width, proposal.width ?? width), height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified) }
+        let contentWidth = ideals.reduce(0) { $0 + $1.width }
+        let linkCount = subviews.indices.filter { $0 % 2 == 1 }.count
+        let extraEach = linkCount > 0 ? max(0, bounds.width - contentWidth) / CGFloat(linkCount) : 0
+        var x = bounds.minX
+        for index in subviews.indices {
+            let width = ideals[index].width + (index % 2 == 1 ? extraEach : 0)
+            subviews[index].place(
+                at: CGPoint(x: x, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: width, height: ideals[index].height))
+            x += width
+        }
+    }
+}
+
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @ObservedObject var state: InboxViewState
 
+    /// Pipeline detail is padded 12pt on each side of this panel.
+    private static let inboxWidth: CGFloat = 430
+
     private var fittedSize: NSSize {
         let height = state.selectedMR == nil ? ceil(state.contentHeight + state.chromeHeight + 2) : 540
-        return NSSize(width: state.selectedMR == nil ? 430 : 620,
+        return NSSize(width: state.selectedMR == nil ? Self.inboxWidth : 620,
                       height: min(state.maximumHeight, max(160, height)))
     }
 
@@ -599,18 +629,20 @@ struct InboxView: View {
                 }
             } else {
                 if !state.jobs.isEmpty {
-                    HStack(alignment: .top, spacing: 0) {
-                        ForEach(Array(stages.enumerated()), id: \.element) { index, stage in
-                            if index > 0 { Rectangle().fill(Color.white.opacity(0.16)).frame(height: 1).padding(.top, 12).frame(maxWidth: 20) }
-                            let list = state.jobs.filter { $0.stage == stage }
-                            let status = stageStatus(stage)
-                            VStack(spacing: 5) {
-                                Image(systemName: Deck.icon(status)).font(.system(size: 24)).foregroundColor(Deck.color(status))
-                                Text(stage).font(.system(size: 10, weight: .semibold)).lineLimit(1)
-                                Text("\(completed(list))/\(list.count) jobs").font(.system(size: 9)).foregroundColor(.secondary)
-                            }.frame(maxWidth: .infinity)
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        StageTrack {
+                            ForEach(stagePieces, id: \.self) { piece in
+                                switch piece {
+                                case .link:
+                                    Rectangle().fill(Color.white.opacity(0.16)).frame(height: 1).frame(minWidth: 12, idealWidth: 12, maxWidth: .infinity).padding(.top, 12)
+                                case .stage(let stage):
+                                    stageColumn(stage)
+                                }
+                            }
                         }
-                    }.padding(.vertical, 10)
+                        .padding(.vertical, 10)
+                        .frame(minWidth: Self.inboxWidth - 24, alignment: .leading)
+                    }
                     HStack { Text("Jobs (\(state.jobs.count))").font(.system(size: 11, weight: .semibold)); Spacer(); Text("\(completed(state.jobs)) finished").font(.system(size: 10)).foregroundColor(.secondary) }
                     panel {
                         ForEach(Array(state.jobs.enumerated()), id: \.element.id) { index, job in
@@ -912,6 +944,33 @@ struct InboxView: View {
                 .labelsHidden().toggleStyle(.switch).controlSize(.mini).tint(Deck.cyan)
         }.padding(.horizontal, 10).padding(.vertical, 8)
     }
+    private enum StagePiece: Hashable {
+        case stage(String)
+        case link(Int)
+    }
+
+    /// Stage columns with a link before every stage after the first.
+    private var stagePieces: [StagePiece] {
+        var pieces: [StagePiece] = []
+        for (index, stage) in stages.enumerated() {
+            if index > 0 { pieces.append(.link(index)) }
+            pieces.append(.stage(stage))
+        }
+        return pieces
+    }
+
+    private func stageColumn(_ stage: String) -> some View {
+        let list = state.jobs.filter { $0.stage == stage }
+        let status = stageStatus(stage)
+        return VStack(spacing: 5) {
+            Image(systemName: Deck.icon(status)).font(.system(size: 24)).foregroundColor(Deck.color(status))
+            Text(stage).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+            Text("\(completed(list))/\(list.count) jobs").font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(minWidth: 44)
+    }
+
     private func stageStatus(_ stage: String) -> String {
         let statuses = state.jobs.filter { $0.stage == stage }.map(\.status)
         if statuses.contains("failed") { return "failed" }
