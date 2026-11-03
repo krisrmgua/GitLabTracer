@@ -22,14 +22,14 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private var lastJobStatus: [String: String] = [:]
     private var baselineDone = false
     /// Failures already announced, including ones found on the first refresh.
-    private var notifiedFailureIDs: [String] = UserDefaults.standard.stringArray(forKey: "gitlabtracer.notifiedFailureIDs") ?? []
+    private var notifiedFailureIDs: [String] = UserDefaults.standard.stringArray(forKey: "pipelinetracer.notifiedFailureIDs") ?? []
     private var pipelines: [Pipeline] = []
     private var lastGitLab: Date?
     private var gitlabTimer: Timer?
     private var gitlabRefreshing = false
 
     // Work runs one job at a time so git and merges never overlap.
-    private let work = DispatchQueue(label: "gitlabtracer.work")
+    private let work = DispatchQueue(label: "pipelinetracer.work")
     private var pendingLabels: [String] = []
     private var lastResult: String?
 
@@ -263,7 +263,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard !notifiedFailureIDs.contains(key) else { return false }
         notifiedFailureIDs.append(key)
         if notifiedFailureIDs.count > 300 { notifiedFailureIDs.removeFirst(notifiedFailureIDs.count - 300) }
-        UserDefaults.standard.set(notifiedFailureIDs, forKey: "gitlabtracer.notifiedFailureIDs")
+        UserDefaults.standard.set(notifiedFailureIDs, forKey: "pipelinetracer.notifiedFailureIDs")
         return true
     }
 

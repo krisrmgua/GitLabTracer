@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="Pipeline Tracer.app"
-BUNDLE_ID="com.kris.gitlabtracer"
+BUNDLE_ID="com.kris.pipelinetracer"
 
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/PipelineTracer"

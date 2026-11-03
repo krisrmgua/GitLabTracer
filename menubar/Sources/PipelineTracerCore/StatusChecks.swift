@@ -42,7 +42,7 @@ public final class StatusChecks {
         precondition(failed.userInfo["url"] as? String == "https://gitlab.com/group/repo/-/jobs/42")
     }
     func testPanelReturnsToOverviewByDefault() {
-        let key = "gitlabtracer.rememberPlace"
+        let key = "pipelinetracer.rememberPlace"
         let previous = UserDefaults.standard.object(forKey: key)
         UserDefaults.standard.removeObject(forKey: key)
         precondition(!PipelineTracerPrefs.rememberPlace)
