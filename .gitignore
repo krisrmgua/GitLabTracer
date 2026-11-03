@@ -1,0 +1,6 @@
+# Swift / SwiftPM
+menubar/.build/
+menubar/GitLab Tracer.app/
+.swiftpm/
+
+.DS_Store
