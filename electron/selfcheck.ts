@@ -1,0 +1,239 @@
+// `npm run check`: status rules, dates, notification text, GitHub run mapping, and
+// pull-request status, without calling GitLab or GitHub. Port of StatusChecks.swift.
+import assert from "node:assert/strict";
+import {
+  browserURL,
+  githubMergeMethod,
+  githubPullStatus,
+  githubRepoName,
+  githubStatus,
+  groupSameChange,
+  groupTitle,
+  isActiveStatus,
+  isDone,
+  isReady,
+  makeMergeRequest,
+  makePipeline,
+  mergeRequestIID,
+  mrKey,
+  normalizeMergeStatus,
+  normalizePipelineStatus,
+  notificationContent,
+  numberLabel,
+  parseDate,
+  parseGitHubPull,
+  parseGitHubRun,
+  pipelineKey,
+  progressState,
+  projectIDFromGraphQL,
+  refLabel,
+  sameChange,
+  sanitizePrefs,
+  trayCounts,
+  unresolvedFailures,
+  type Job,
+  type Pipeline,
+} from "./logic";
+import { appIconPng, trayIconPng } from "./icons";
+import { merge } from "./model";
+
+const checks: Array<[string, () => void | Promise<void>]> = [];
+const check = (name: string, fn: () => void | Promise<void>) => checks.push([name, fn]);
+
+const job = (status: string, id: number): Job => ({ id, name: "job", stage: "test", status, url: "", duration: null });
+const pipeline = (status: string, jobs: Job[] = []): Pipeline =>
+  makePipeline({ projectID: 1, id: 2, project: "group/repo", ref: "main", status, url: "https://gitlab.com", jobs });
+
+check("failure counts as finished but never passing", () => {
+  const [status, fraction] = progressState(pipeline("failed", [job("success", 1), job("failed", 2), job("pending", 3)]));
+  assert.equal(status, "failed");
+  assert.ok(Math.abs(fraction - 2 / 3) < 0.001);
+});
+
+check("canceled and skipped stay themselves", () => {
+  assert.equal(progressState(pipeline("canceled", [job("canceled", 1)]))[0], "canceled");
+  assert.equal(progressState(pipeline("skipped", [job("skipped", 1)]))[0], "skipped");
+});
+
+check("manual, waiting, and running classification", () => {
+  assert.equal(progressState(pipeline("running", [job("manual", 1)]))[0], "pending");
+  assert.ok(isActiveStatus("waiting_for_resource"));
+  assert.ok(!isDone("manual"));
+  assert.ok(isDone("failed"));
+});
+
+check("draft cannot be ready", () => {
+  const mr = makeMergeRequest({ projectID: 1, iid: 4, title: "Draft", draft: true, mergeStatus: "mergeable", pipelineStatus: "success" });
+  assert.ok(!isReady(mr));
+});
+
+check("later pipeline for the same commit clears a failure", () => {
+  const failed = makePipeline({ projectID: 1, id: 10, project: "example/app", ref: "fix/header", status: "failed", updated: 10_000, sha: "aaaaaaaaaa" });
+  const passed = makePipeline({ projectID: 1, id: 11, project: "example/app", ref: "refs/merge-requests/17/head", status: "success", updated: 20_000, sha: "aaaaaaaaaa" });
+  const main = makePipeline({ projectID: 1, id: 12, project: "example/app", ref: "main", status: "success", updated: 30_000, sha: "bbbbbbbbbb" });
+  assert.equal(unresolvedFailures([main, passed, failed]).length, 0);
+  assert.equal(unresolvedFailures([failed]).length, 1);
+  assert.equal(unresolvedFailures([failed, main]).length, 1);
+  const olderPass = makePipeline({ projectID: 1, id: 9, project: "example/app", ref: "refs/merge-requests/17/head", status: "success", updated: 1_000, sha: "aaaaaaaaaa" });
+  assert.equal(unresolvedFailures([failed, olderPass]).length, 1);
+});
+
+check("branch and merge-request pipelines group", () => {
+  const mr = makePipeline({ projectID: 1, id: 20, project: "example/app", ref: "refs/merge-requests/15/head", status: "running", updated: 20_000, sha: "different-sha", sourceBranch: "feature/header" });
+  const branch = makePipeline({ projectID: 1, id: 19, project: "example/app", ref: "feature/header", status: "running", updated: 19_000, sha: "branch-sha" });
+  const main = makePipeline({ projectID: 1, id: 21, project: "example/app", ref: "main", status: "running", updated: 21_000, sha: "main-sha" });
+  const groups = groupSameChange([main, mr, branch]);
+  assert.equal(groups.length, 2);
+  assert.ok(groups.some((g) => g.pipelines.map((p) => p.id).sort().join() === "19,20"));
+  assert.ok(groups.some((g) => g.pipelines.map((p) => p.id).join() === "21"));
+  assert.equal(groupTitle([mr, branch]), "feature/header");
+  assert.equal(mergeRequestIID(makePipeline({ projectID: 1, id: 1, ref: "refs/merge-requests/15/head", status: "running" })), 15);
+  assert.equal(mergeRequestIID(main), null);
+  const sameSha = makePipeline({ projectID: 1, id: 30, ref: "refs/merge-requests/8/head", status: "running", sha: "abc" });
+  const twin = makePipeline({ projectID: 1, id: 31, ref: "feature/other", status: "running", sha: "abc" });
+  assert.equal(groupSameChange([sameSha, twin, main]).length, 2);
+  assert.ok(!sameChange(sameSha, main));
+});
+
+check("dates parse with and without fractional seconds", () => {
+  assert.notEqual(parseDate("2026-10-31T22:10:12.123Z"), null);
+  assert.notEqual(parseDate("2026-10-31T22:10:12Z"), null);
+  assert.equal(parseDate("nope"), null);
+});
+
+check("notification content", () => {
+  const body = "Fix e2e: " + "calendar ".repeat(30);
+  const content = notificationContent("Merge complete", "example/app · !347", body, "mr-347", false, "https://gitlab.com/group/repo/-/merge_requests/347", "mergeRequest");
+  assert.equal(content.title, "Pipeline Tracer");
+  assert.equal(content.subtitle, "Merge complete");
+  assert.ok(content.body.startsWith("example/app · !347"));
+  assert.equal([...content.body].length, 90);
+  assert.ok(content.body.endsWith("…"));
+  assert.ok(!content.sound && content.kind === "mergeRequest" && content.thread === "mr-347");
+  const failed = notificationContent("Job failed", "group/repo · #12", "test:integration\n failed", "1:12", true, "https://gitlab.com/group/repo/-/jobs/42", "logs");
+  assert.equal(failed.subtitle, "Job failed");
+  assert.equal(failed.body, "group/repo · #12 · test:integration failed");
+  assert.ok(failed.sound && failed.urgent && failed.kind === "logs");
+  assert.equal(failed.url, "https://gitlab.com/group/repo/-/jobs/42");
+});
+
+check("preferences fall back to defaults", () => {
+  const prefs = sanitizePrefs({ refreshSeconds: 7, pipelineHours: 4, rememberPlace: true } as never);
+  assert.equal(prefs.refreshSeconds, 60);
+  assert.equal(prefs.pipelineHours, 4);
+  assert.equal(prefs.rememberPlace, true);
+  assert.equal(sanitizePrefs(null).rememberPlace, false);
+  assert.equal(sanitizePrefs(null).mergeButton, true);
+});
+
+check("GraphQL helpers", () => {
+  assert.equal(projectIDFromGraphQL("gid://gitlab/Project/81197701"), 81197701);
+  assert.equal(projectIDFromGraphQL(42), 42);
+  assert.equal(normalizeMergeStatus("DRAFT_STATUS"), "draft_status");
+  assert.equal(normalizeMergeStatus("NOT_APPROVED"), "not_approved");
+  assert.equal(normalizePipelineStatus("SUCCESS"), "success");
+});
+
+check("GitHub runs stay separate from GitLab", () => {
+  assert.equal(githubRepoName("krisrmgua/PipelineTracer"), "krisrmgua/PipelineTracer");
+  assert.equal(githubRepoName("owner/repo name"), null);
+  assert.equal(githubRepoName("owner/repo/extra"), null);
+  assert.equal(githubRepoName("https://github.com/owner/repo"), null);
+  assert.equal(githubStatus("in_progress", null), "running");
+  assert.equal(githubStatus("queued", null), "pending");
+  assert.equal(githubStatus("completed", "success"), "success");
+  assert.equal(githubStatus("completed", "failure"), "failed");
+  assert.equal(githubStatus("completed", "cancelled"), "canceled");
+  assert.equal(githubStatus("completed", "action_required"), "manual");
+  assert.ok(browserURL("https://github.com/owner/repo/actions/runs/1")?.includes("github.com"));
+  assert.ok(browserURL("https://gitlab.com/group/repo/-/pipelines/1")?.includes("gitlab.com"));
+  assert.equal(browserURL("http://github.com/owner/repo"), null);
+  assert.equal(browserURL("https://evil.github.com.example/owner/repo"), null);
+  assert.equal(browserURL("https://user@github.com/owner/repo"), null);
+  const run = {
+    id: 42,
+    name: "CI",
+    head_branch: "main",
+    head_sha: "abc",
+    status: "completed",
+    conclusion: "failure",
+    html_url: "https://github.com/example/app/actions/runs/42",
+    updated_at: "2026-11-03T12:00:00Z",
+  };
+  const parsed = parseGitHubRun(run, 7, "example/app");
+  assert.ok(parsed);
+  assert.equal(parsed.host, "github");
+  assert.equal(parsed.status, "failed");
+  assert.equal(parsed.workflow, "CI");
+  assert.equal(refLabel(parsed), "CI · main");
+  assert.equal(pipelineKey(parsed), "github:7:42");
+  const failed = makePipeline({ host: "gitlab", projectID: 7, id: 10, project: "example/app", ref: "main", status: "failed", sha: "abc" });
+  const passed = makePipeline({ host: "github", projectID: 7, id: 99, project: "example/app", ref: "main", status: "success", sha: "abc", workflow: "CI" });
+  assert.equal(unresolvedFailures([failed, passed]).length, 1);
+  assert.ok(!sameChange(failed, passed));
+  const docs = makePipeline({ host: "github", projectID: 7, id: 100, project: "example/app", ref: "main", status: "success", updated: 30_000, sha: "abc", workflow: "Docs" });
+  const ci = makePipeline({ host: "github", projectID: 7, id: 98, project: "example/app", ref: "main", status: "failed", updated: 20_000, sha: "abc", workflow: "CI" });
+  assert.deepEqual(unresolvedFailures([docs, ci]).map((p) => p.workflow), ["CI"]);
+});
+
+check("GitHub pull request status", async () => {
+  const ready = githubPullStatus(false, "MERGEABLE", null, "SUCCESS");
+  assert.ok(!ready.draft && ready.mergeStatus === "mergeable");
+  assert.equal(githubPullStatus(false, "MERGEABLE", "REVIEW_REQUIRED", "SUCCESS").mergeStatus, "not_approved");
+  assert.equal(githubPullStatus(false, "CONFLICTING", null, null).mergeStatus, "conflict");
+  const draft = githubPullStatus(true, "MERGEABLE", null, null);
+  assert.ok(draft.draft && draft.mergeStatus === "draft_status");
+  const node = {
+    number: 8,
+    title: "Add login",
+    url: "https://github.com/example/app/pull/8",
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    updatedAt: "2026-11-03T12:00:00Z",
+    headRefName: "feature/login",
+    baseRefName: "main",
+    headRefOid: "abc",
+    repository: { databaseId: 7, nameWithOwner: "example/app", isArchived: false },
+    statusCheckRollup: { state: "SUCCESS" },
+  };
+  const parsed = parseGitHubPull(node);
+  assert.ok(parsed);
+  assert.equal(parsed.host, "github");
+  assert.equal(numberLabel(parsed), "#8");
+  assert.equal(mrKey(parsed), "github:7:8");
+  assert.ok(isReady(parsed));
+  assert.equal(parsed.project, "example/app");
+  assert.equal(parseGitHubPull({ ...node, url: "https://example.com/pull/8" }), null);
+  assert.equal(parseGitHubPull({ ...node, repository: { databaseId: 7, nameWithOwner: "example/app", isArchived: true } }), null);
+  assert.equal(githubMergeMethod(true, true, true), "merge");
+  assert.equal(githubMergeMethod(false, true, true), "squash");
+  assert.equal(githubMergeMethod(false, false, true), "rebase");
+  assert.equal(githubMergeMethod(false, false, false), null);
+  const outcome = await merge(
+    makeMergeRequest({ host: "github", projectID: 7, iid: 8, title: "Add login", project: "not a repo", url: "https://github.com/example/app/pull/8", mergeStatus: "mergeable", pipelineStatus: "success" }),
+  );
+  assert.deepEqual(outcome, { ok: false, message: "couldn't load pull request" });
+});
+
+check("tray counts and icons", () => {
+  const failing = makePipeline({ projectID: 1, id: 5, ref: "main", status: "failed", sha: "x" });
+  const running = makePipeline({ projectID: 1, id: 6, ref: "dev", status: "running", sha: "y" });
+  const counts = trayCounts([failing, running], [makeMergeRequest({ projectID: 1, iid: 1, title: "a" })]);
+  assert.deepEqual(counts, { requests: 1, running: 1, failed: 1 });
+  const png = trayIconPng("running", 0.5, false, 36);
+  assert.equal(png.subarray(1, 4).toString("ascii"), "PNG");
+  assert.equal(trayIconPng("failed", 1, true, 32).readUInt32BE(16), 32);
+  assert.equal(appIconPng(64).readUInt32BE(16), 64);
+});
+
+void (async () => {
+  for (const [name, fn] of checks) {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(`FAIL ${name}`);
+      throw err;
+    }
+  }
+  console.log(`${checks.length} status/date/notification checks passed`);
+})();

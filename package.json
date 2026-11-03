@@ -1,0 +1,73 @@
+{
+  "name": "pipeline-tracer",
+  "productName": "Pipeline Tracer",
+  "version": "0.2.0",
+  "description": "Tray inbox for your GitLab merge requests and pipelines and GitHub pull requests and Actions runs, for macOS and Windows",
+  "main": "dist-electron/main.js",
+  "author": "Kristopher Simmons",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev:ui": "vite",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json --noEmit",
+    "build:ui": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run typecheck && npm run build:ui && npm run build:electron",
+    "icons": "node scripts/make-icon.cjs",
+    "check": "npm run build:electron && node dist-electron/selfcheck.js",
+    "start": "npm run build && electron .",
+    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env PIPELINE_TRACER_DEV=1 electron .\"",
+    "pack:mac": "npm run build && npm run icons && electron-builder --mac",
+    "pack:win": "npm run build && npm run icons && electron-builder --win",
+    "pack": "npm run build && npm run icons && electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "com.kris.pipelinetracer",
+    "productName": "Pipeline Tracer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!dist-electron/selfcheck.js",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "zip"
+      ],
+      "icon": "assets/icon.png",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Pipeline Tracer"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2",
+    "wait-on": "^8.0.3"
+  },
+  "allowScripts": {
+    "electron@35.7.5": true,
+    "esbuild@0.25.12": true
+  }
+}
