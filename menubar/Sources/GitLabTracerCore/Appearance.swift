@@ -12,7 +12,7 @@ enum GitLabTracerPrefs {
 
     /// Seconds between GitLab refreshes.
     static var gitlabRefreshSeconds: Int {
-        get { int(gitlabRefreshKey, 30, gitlabRefreshChoices) }
+        get { int(gitlabRefreshKey, 60, gitlabRefreshChoices) }
         set { UserDefaults.standard.set(newValue, forKey: gitlabRefreshKey) }
     }
     /// How far back finished pipelines are listed, in hours.
