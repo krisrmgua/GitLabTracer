@@ -13,7 +13,15 @@ public final class StatusChecks {
         precondition(GitLabModel.parseDate("2026-10-31T22:10:12Z") != nil)
         checks.testNotificationContent()
         checks.testPanelReturnsToOverviewByDefault()
-        print("10 status/date/notification checks passed")
+        checks.testGraphQLHelpers()
+        print("11 status/date/notification checks passed")
+    }
+    func testGraphQLHelpers() {
+        precondition(GitLabModel.projectID(fromGraphQL: "gid://gitlab/Project/81197701") == 81197701)
+        precondition(GitLabModel.projectID(fromGraphQL: 42) == 42)
+        precondition(GitLabModel.normalizeMergeStatus("DRAFT_STATUS") == "draft_status")
+        precondition(GitLabModel.normalizeMergeStatus("NOT_APPROVED") == "not_approved")
+        precondition(GitLabModel.normalizePipelineStatus("SUCCESS") == "success")
     }
     func testNotificationContent() {
         let body = "Fix e2e: " + String(repeating: "calendar ", count: 30)

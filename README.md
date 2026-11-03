@@ -59,10 +59,11 @@ Quit and rerun `./install.sh` after you change the source if you want the menu-b
 
 On a timer, Tracer asks GitLab.com, through `glab`, for:
 
-- open merge requests you created (up to 30), skipping archived projects
-- projects you belong to that were active in the last few days (up to 60; archived excluded)
-- your recent pipelines on those projects (10 per project, inside the hour window you set)
-- jobs for a pipeline when you open it (up to 100)
+- open merge requests you created (one GraphQL query, up to 30; archived projects dropped in that response)
+- your recent pipelines across projects (`GET /pipelines`, one call instead of one per project)
+- jobs only for the status-card pipeline, newly finished failures, or when you open a pipeline (cached while status+sha stay the same)
+
+Your GitLab username is cached for an hour so the timer does not re-hit `/user` every tick.
 
 The overview groups that into:
 

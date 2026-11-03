@@ -480,11 +480,14 @@ struct InboxView: View {
         if model.preview { state.historyJobs[key] = p.jobs; return }
         state.historyLoading = key
         DispatchQueue.global(qos: .utility).async {
-            let result = GitLabModel.loadJobs(projectID: p.projectID, pipelineID: p.id)
+            let result = GitLabModel.jobsForPipeline(p)
             DispatchQueue.main.async {
                 guard state.expandedHistory == key else { return }
                 state.historyLoading = nil
-                switch result { case .success(let jobs): state.historyJobs[key] = jobs; case .failure: state.historyError = "Couldn’t load completed jobs. Open the pipeline in GitLab." }
+                switch result {
+                case .success(let jobs): state.historyJobs[key] = jobs
+                case .failure: state.historyError = "Couldn’t load completed jobs. Open the pipeline in GitLab."
+                }
             }
         }
     }
@@ -932,7 +935,7 @@ struct InboxView: View {
         DispatchQueue.global(qos: .utility).async {
             var loaded: [Int: [Job]] = [:]
             for pipeline in pipelines {
-                if case .success(let jobs) = GitLabModel.loadJobs(projectID: pipeline.projectID, pipelineID: pipeline.id) {
+                if case .success(let jobs) = GitLabModel.jobsForPipeline(pipeline) {
                     loaded[pipeline.id] = jobs
                 }
             }
@@ -950,8 +953,15 @@ struct InboxView: View {
         resetDetail(); state.selectedPipeline = p; state.jobs = p.jobs; if model.preview { return }; state.loadingJobs = true
         let token = UUID(); state.requestID = token
         DispatchQueue.global(qos: .utility).async {
-            let result = GitLabModel.loadJobs(projectID: p.projectID, pipelineID: p.id)
-            DispatchQueue.main.async { guard state.requestID == token else { return }; state.loadingJobs = false; switch result { case .success(let fetched): state.jobs = fetched; case .failure: state.loadError = "Couldn’t load jobs. Check GitLab access or open in browser." } }
+            let result = GitLabModel.jobsForPipeline(p)
+            DispatchQueue.main.async {
+                guard state.requestID == token else { return }
+                state.loadingJobs = false
+                switch result {
+                case .success(let fetched): state.jobs = fetched
+                case .failure: state.loadError = "Couldn’t load jobs. Check GitLab access or open in browser."
+                }
+            }
         }
     }
     private func cleanLog(_ text: String) -> String {
