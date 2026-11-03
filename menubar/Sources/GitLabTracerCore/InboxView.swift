@@ -843,20 +843,50 @@ struct InboxView: View {
         }
     }
     private func preferenceChoice(_ title: String, options: [Int], value: Int, suffix: String, set: @escaping (Int) -> Void) -> some View {
-        Menu {
-            ForEach(options, id: \.self) { option in
-                Button { set(option); model.objectWillChange.send() } label: { if option == value { Label("\(option) \(suffix)", systemImage: "checkmark") } else { Text("\(option) \(suffix)") } }
+        HStack(spacing: 10) {
+            Text(title).font(.system(size: 11)).foregroundColor(.white)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        set(option)
+                        model.objectWillChange.send()
+                    } label: {
+                        if option == value {
+                            Label("\(option) \(suffix)", systemImage: "checkmark")
+                        } else {
+                            Text("\(option) \(suffix)")
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Text("\(value) \(suffix)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Deck.cyan)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
             }
-        } label: {
-            HStack(spacing: 8) {
-                Text(title).font(.system(size: 11)).foregroundColor(.white)
-                Spacer(minLength: 12)
-                Text("\(value) \(suffix)").font(.system(size: 11)).foregroundColor(Deck.cyan)
-                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold)).foregroundColor(Deck.cyan)
-            }.padding(10).contentShape(Rectangle())
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     private func preferenceToggle(_ title: String, value: Bool, refresh: Bool = true, set: @escaping (Bool) -> Void) -> some View {

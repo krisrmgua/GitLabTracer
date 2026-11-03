@@ -93,7 +93,7 @@ Allow notifications the first time macOS asks, or from **Preferences** inside th
 | Item | Default |
 |---|---|
 | Reopen where I left off | Off. Closing the panel returns you to the overview. |
-| Refresh interval | A few minutes. The menu lists the choices. |
+| Refresh interval | 60 seconds. The menu lists the choices. |
 | Pipeline window | How many hours of pipelines to fetch. |
 | Merge button | Off until you enable it. |
 | Menu bar colors | Navy capsule. Failures use a stronger treatment so the menu bar is obvious. |
