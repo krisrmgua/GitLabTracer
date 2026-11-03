@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-LABEL="com.kris.gitlabtracer"
+LABEL="com.kris.pipelinetracer"
+OLD_LABEL="com.kris.gitlabtracer"
 APP_DEST="$HOME/Applications/Pipeline Tracer.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
@@ -39,9 +40,14 @@ launchctl bootout "$DOMAIN/com.kris.deploymentor" 2>/dev/null || true
 pkill -f "$HOME/Applications/Deploymentor.app/Contents/MacOS/Deploymentor" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/com.kris.deploymentor.plist"
 rm -rf "$HOME/Applications/Deploymentor.app"
-if defaults read com.kris.deploymentor >/dev/null 2>&1 && ! defaults read "$LABEL" >/dev/null 2>&1; then
-  defaults export com.kris.deploymentor - | sed 's/<key>deploymentor\./<key>gitlabtracer./' | defaults import "$LABEL" -
+if defaults read "$OLD_LABEL" >/dev/null 2>&1 && ! defaults read "$LABEL" >/dev/null 2>&1; then
+  defaults export "$OLD_LABEL" - | sed 's/<key>gitlabtracer\./<key>pipelinetracer./' | defaults import "$LABEL" -
 fi
+if defaults read com.kris.deploymentor >/dev/null 2>&1 && ! defaults read "$LABEL" >/dev/null 2>&1; then
+  defaults export com.kris.deploymentor - | sed 's/<key>deploymentor\./<key>pipelinetracer./' | defaults import "$LABEL" -
+fi
+launchctl bootout "$DOMAIN/$OLD_LABEL" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "Installed $APP_DEST and enabled login start ($PLIST)"

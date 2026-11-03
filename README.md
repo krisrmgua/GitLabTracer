@@ -43,7 +43,7 @@ cd PipelineTracer/menubar
 ./install.sh
 ```
 
-That builds `Pipeline Tracer.app`, copies it to `~/Applications/Pipeline Tracer.app`, and starts it at login. Run `./install.sh` again to update. The bundle id is `com.kris.gitlabtracer`.
+That builds `Pipeline Tracer.app`, copies it to `~/Applications/Pipeline Tracer.app`, and starts it at login. Run `./install.sh` again to update. The bundle id is `com.kris.pipelinetracer`.
 
 A manual build, without installing, is:
 
@@ -99,7 +99,7 @@ Allow notifications the first time macOS asks, or from **Preferences** inside th
 | Merge button | Off until you enable it. |
 | Menu bar colors | Navy capsule. Failures use a stronger treatment so the menu bar is obvious. |
 
-Preferences live in UserDefaults under `com.kris.gitlabtracer`. They are not credentials.
+Preferences live in UserDefaults under `com.kris.pipelinetracer`. They are not credentials. An older `com.kris.gitlabtracer` domain is copied across once on install.
 
 ### Clicking away
 

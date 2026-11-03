@@ -8,7 +8,7 @@ Open a GitHub issue for a vulnerability in this repository. Do not paste tokens,
 
 ## What the app stores
 
-UserDefaults domain `com.kris.gitlabtracer` holds the refresh interval, the pipeline window, whether the merge button is available, whether the panel reopens where you left it, and the failure ids already announced. Those are settings, not credentials.
+UserDefaults domain `com.kris.pipelinetracer` holds the refresh interval, the pipeline window, whether the merge button is available, whether the panel reopens where you left it, and the failure ids already announced. Those are settings, not credentials. Install copies an older `com.kris.gitlabtracer` domain into this one once.
 
 Job logs are shown in the panel and can be copied. They are not written to disk. A pipeline that prints a secret will show that secret here, the same way GitLab's own job page would.
 

@@ -2,10 +2,10 @@ import AppKit
 
 /// GitLab behavior preferences saved in UserDefaults.
 enum PipelineTracerPrefs {
-    private static let gitlabRefreshKey = "gitlabtracer.gitlabRefreshSeconds"
-    private static let pipelineHoursKey = "gitlabtracer.pipelineHours"
-    private static let mergeButtonKey = "gitlabtracer.mergeButton"
-    private static let rememberPlaceKey = "gitlabtracer.rememberPlace"
+    private static let gitlabRefreshKey = "pipelinetracer.gitlabRefreshSeconds"
+    private static let pipelineHoursKey = "pipelinetracer.pipelineHours"
+    private static let mergeButtonKey = "pipelinetracer.mergeButton"
+    private static let rememberPlaceKey = "pipelinetracer.rememberPlace"
 
     static let gitlabRefreshChoices = [10, 20, 30, 40, 50, 60]
     static let pipelineHourChoices = [1, 2, 4, 6, 8, 12, 24]
