@@ -3,4 +3,12 @@ menubar/.build/
 menubar/Pipeline Tracer.app/
 .swiftpm/
 
+# Electron / Node
+node_modules/
+dist/
+dist-electron/
+release/
+assets/icon.png
+*.log
+
 .DS_Store
