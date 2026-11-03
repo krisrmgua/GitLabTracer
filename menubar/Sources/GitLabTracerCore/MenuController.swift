@@ -73,6 +73,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         statusItem.button?.target = self
         statusItem.button?.action = #selector(toggleInbox)
         inbox.merge = { [weak self] mr in self?.confirmMerge(mr) }
+        inbox.close = { [weak self] mr in self?.confirmClose(mr) }
         inbox.refresh = { [weak self] in self?.scheduleTimers(); self?.refreshGitLab() }
         statusItem.button?.title = "GitLab Tracer"
     }
@@ -353,6 +354,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             if mr.isReady && GitLabTracerPrefs.mergeButton {
                 sub.addItem(actionItem("Merge…") { self.confirmMerge(mr) })
             }
+            sub.addItem(actionItem("Close MR…") { self.confirmClose(mr) })
             let tone: Tone = mr.isReady ? .good : mr.draft ? .dim : toneFor(pipeline: mr.pipelineStatus)
             m.addItem(submenuItem("\(glyphForMR(mr)) \(mr.project) !\(mr.iid) — \(mr.title)", sub, tone: tone))
         }
@@ -449,10 +451,12 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     // MARK: - Actions
 
     private func confirmMerge(_ mr: MergeRequest) {
-        guard inbox.merging == nil else { return }
+        guard inbox.merging == nil, inbox.closing == nil else { return }
         popover.performClose(nil)
         inbox.merging = mr.key
-        enqueue("Merge !\(mr.iid)", completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · !\(mr.iid)", refresh: { self.refreshGitLab() }) {
+        enqueue("Merge !\(mr.iid)", successTitle: "Merge complete", failureTitle: "Merge failed", successStatus: "merged",
+                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · !\(mr.iid)",
+                refresh: { self.refreshGitLab() }) {
             switch GitLabModel.merge(mr) {
             case .merged: return nil
             case .failed(let msg): return msg
@@ -460,8 +464,22 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         }
     }
 
+    private func confirmClose(_ mr: MergeRequest) {
+        guard inbox.merging == nil, inbox.closing == nil else { return }
+        popover.performClose(nil)
+        inbox.closing = mr.key
+        enqueue("Close !\(mr.iid)", successTitle: "MR closed", failureTitle: "Close failed", successStatus: "canceled",
+                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · !\(mr.iid)",
+                refresh: { self.refreshGitLab() }) {
+            switch GitLabModel.close(mr) {
+            case .closed: return nil
+            case .failed(let msg): return msg
+            }
+        }
+    }
+
     /// Adds a job to the serial queue. `refresh` runs on the main thread after it finishes.
-    private func enqueue(_ label: String, completionURL: String = "https://gitlab.com", completionDetail: String = "", completionSubtitle: String = "", refresh: @escaping () -> Void = {}, _ job: @escaping () -> String?) {
+    private func enqueue(_ label: String, successTitle: String = "Merge complete", failureTitle: String = "Merge failed", successStatus: String = "merged", completionURL: String = "https://gitlab.com", completionDetail: String = "", completionSubtitle: String = "", refresh: @escaping () -> Void = {}, _ job: @escaping () -> String?) {
         DispatchQueue.main.async { self.pendingLabels.append(label) }
         work.async {
             let err = job()
@@ -470,7 +488,8 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
                 self.lastResult = err.map { "Failed: \(label) — \($0)" } ?? "Done: \(label)"
                 self.inbox.result = self.lastResult
                 self.inbox.merging = nil
-                self.publish(err == nil ? "Merge complete" : "Merge failed", completionSubtitle + " · " + (completionDetail.isEmpty ? label : completionDetail) + (err.map { " · " + $0 } ?? ""), status: err == nil ? "merged" : "failed", url: completionURL, thread: completionURL, subtitle: completionSubtitle, bannerBody: err ?? completionDetail, kind: .mergeRequest)
+                self.inbox.closing = nil
+                self.publish(err == nil ? successTitle : failureTitle, completionSubtitle + " · " + (completionDetail.isEmpty ? label : completionDetail) + (err.map { " · " + $0 } ?? ""), status: err == nil ? successStatus : "failed", url: completionURL, thread: completionURL, subtitle: completionSubtitle, bannerBody: err ?? completionDetail, kind: .mergeRequest)
                 refresh()
             }
         }

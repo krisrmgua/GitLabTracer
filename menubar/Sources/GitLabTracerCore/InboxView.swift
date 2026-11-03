@@ -20,8 +20,10 @@ final class InboxModel: ObservableObject {
     @Published var updated: Date?
     @Published var result: String?
     @Published var merging: String?
+    @Published var closing: String?
     var preview = false
     var merge: (MergeRequest) -> Void = { _ in }
+    var close: (MergeRequest) -> Void = { _ in }
     var refresh: () -> Void = {}
 }
 
@@ -77,6 +79,7 @@ final class InboxViewState: ObservableObject {
     @Published var chromeHeight: CGFloat = 70
     @Published var logTab = "Logs"
     @Published var confirmingMerge = false
+    @Published var confirmingClose = false
     @Published var mrDescription = ""
     @Published var mrAuthor = ""
     @Published var mrLoading = false
@@ -114,6 +117,7 @@ final class InboxViewState: ObservableObject {
         notifications = false
         history = false
         confirmingMerge = false
+        confirmingClose = false
         loadError = nil
         jobs = []
         loadingJobs = false
@@ -214,7 +218,7 @@ struct InboxView: View {
         .onChange(of: fittedSize) { state.resize($0) }
         .onAppear { state.resize(fittedSize) }
         .onReceive(model.$mrs) { list in
-            guard let current = state.selectedMR, !state.mrLoading, !state.confirmingMerge else { return }
+            guard let current = state.selectedMR, !state.mrLoading, !state.confirmingMerge, !state.confirmingClose else { return }
             guard var fresh = list.first(where: { $0.key == current.key }) else { state.mrError = "This merge request is no longer in the open list. Refresh or open GitLab."; return }
             if fresh.pipelineStatus == nil { fresh.pipelineStatus = current.pipelineStatus }
             state.selectedMR = fresh
@@ -223,10 +227,12 @@ struct InboxView: View {
         .foregroundColor(.white)
         .preferredColorScheme(.dark)
         .tint(Deck.cyan)
-        .allowsHitTesting(!state.confirmingMerge)
+        .allowsHitTesting(!state.confirmingMerge && !state.confirmingClose)
         .overlay {
             if state.confirmingMerge, let mr = state.selectedMR {
                 ZStack { Color.black.opacity(0.45); mergeConfirmation(mr).frame(width: 290).shadow(color: .black.opacity(0.4), radius: 20) }
+            } else if state.confirmingClose, let mr = state.selectedMR {
+                ZStack { Color.black.opacity(0.45); closeConfirmation(mr).frame(width: 290).shadow(color: .black.opacity(0.4), radius: 20) }
             }
         }
     }
@@ -674,10 +680,38 @@ struct InboxView: View {
                             HStack { Image(systemName: Deck.icon(job.status)).foregroundColor(Deck.color(job.status)); Text(job.name).lineLimit(1); Spacer(); Text(job.duration.map { duration($0) } ?? "—").foregroundColor(.secondary) }.font(.system(size: 10)).padding(.horizontal, 10).padding(.vertical, 7)
                         }
                     }
-                    if GitLabTracerPrefs.mergeButton {
-                        Button(model.merging == mr.key ? "Merging…" : "Merge…") { state.confirmingMerge = true }.buttonStyle(DeckActionStyle(primary: true)).disabled(!mr.isReady || model.merging != nil || state.mrLoading || state.mrError != nil)
+                    HStack(spacing: 8) {
+                        if GitLabTracerPrefs.mergeButton {
+                            Button {
+                                state.confirmingMerge = true
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if !mr.isReady {
+                                        Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold))
+                                    }
+                                    Text(model.merging == mr.key ? "Merging…" : "Merge")
+                                }
+                            }
+                            .buttonStyle(DeckActionStyle(primary: true))
+                            .disabled(!mr.isReady || model.merging != nil || model.closing != nil || state.mrLoading || state.mrError != nil)
+                            .frame(maxWidth: .infinity)
+                        }
+                        Button {
+                            state.confirmingClose = true
+                        } label: {
+                            Text(model.closing == mr.key ? "Closing…" : "Close MR")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .buttonStyle(DeckActionStyle())
+                        .disabled(model.merging != nil || model.closing != nil || state.mrLoading)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
-                    if !mr.isReady { Text("Merge unavailable: \(mrState(mr)).").font(.system(size: 10)).foregroundColor(.secondary) }
+                    if GitLabTracerPrefs.mergeButton {
+                        Text(mr.isReady ? "Ready to merge." : "Merge unavailable: \(mrState(mr)).")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(mr.isReady ? .green : .red)
+                    }
                 }.padding(14)
             }.frame(maxWidth: .infinity)
         }
@@ -714,9 +748,21 @@ struct InboxView: View {
             }
         }.padding(16).frame(maxWidth: .infinity).background(Deck.card).cornerRadius(10).overlay(RoundedRectangle(cornerRadius: 10).stroke(Deck.cyan.opacity(0.3)))
     }
+    private func closeConfirmation(_ mr: MergeRequest) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "xmark.circle").font(.system(size: 25)).foregroundColor(.orange)
+            Text("Close merge request?").font(.system(size: 13, weight: .semibold))
+            Text("Close !\(String(mr.iid)) in \(mr.project)").font(.system(size: 11)).multilineTextAlignment(.center)
+            Text("Leaves the source branch as-is. This does not delete anything.").font(.system(size: 10)).foregroundColor(.secondary).multilineTextAlignment(.center)
+            HStack {
+                Button("Cancel") { state.confirmingClose = false }.buttonStyle(DeckActionStyle()).keyboardShortcut(.cancelAction)
+                Button("Close MR") { state.confirmingClose = false; model.close(mr) }.buttonStyle(DeckActionStyle(primary: true))
+            }
+        }.padding(16).frame(maxWidth: .infinity).background(Deck.card).cornerRadius(10).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.35)))
+    }
     private func mrDetail(_ mr: MergeRequest) -> some View { mrWorkspace(mr) }
     private func showMR(_ mr: MergeRequest) {
-        state.selectedMR = mr; state.confirmingMerge = false; state.mrError = nil; state.mrJobs = []
+        state.selectedMR = mr; state.confirmingMerge = false; state.confirmingClose = false; state.mrError = nil; state.mrJobs = []
         state.mrDescription = ""; state.mrAuthor = ""; state.mrLoading = false
         let token = UUID(); state.requestID = token
         if model.preview {
@@ -923,11 +969,16 @@ private struct DeckActionStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     var primary = false
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 11, weight: .medium)).frame(maxWidth: .infinity)
+        let pressed = configuration.isPressed
+        return configuration.label.font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity)
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(primary ? Deck.cyan.opacity(configuration.isPressed ? 0.55 : 0.9) : Color.white.opacity(configuration.isPressed ? 0.14 : 0.07))
-            .foregroundColor(primary ? Deck.background : .white)
-            .cornerRadius(6).opacity(enabled ? 1 : 0.4)
+            .background(
+                primary
+                    ? (enabled ? Deck.cyan.opacity(pressed ? 0.55 : 0.9) : Color.white.opacity(0.08))
+                    : Color.white.opacity(enabled ? (pressed ? 0.14 : 0.07) : 0.04)
+            )
+            .foregroundColor(primary ? (enabled ? Deck.background : Color.white.opacity(0.35)) : Color.white.opacity(enabled ? 1 : 0.55))
+            .cornerRadius(6)
     }
 }
 

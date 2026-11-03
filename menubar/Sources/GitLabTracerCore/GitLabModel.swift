@@ -22,7 +22,25 @@ struct MergeRequest: Equatable {
 enum GitLabModel {
     static func fetchOpenMergeRequests(onFailure: () -> Void = {}) -> [MergeRequest] {
         guard let list = Shell.glabJSON("merge_requests?scope=created_by_me&state=opened&per_page=30&order_by=updated_at&sort=desc") as? [[String: Any]] else { onFailure(); return [] }
-        return list.compactMap(parse)
+        let mrs = list.compactMap(parse)
+        // The MR list API has no archived filter; drop MRs whose project is archived.
+        let archived = archivedProjects(Set(mrs.map(\.projectID)))
+        return mrs.filter { !archived.contains($0.projectID) }
+    }
+
+    /// Project IDs among `ids` that GitLab reports as archived.
+    static func archivedProjects(_ ids: Set<Int>) -> Set<Int> {
+        guard !ids.isEmpty else { return [] }
+        let list = Array(ids)
+        let lock = NSLock()
+        var archived = Set<Int>()
+        DispatchQueue.concurrentPerform(iterations: list.count) { i in
+            let id = list[i]
+            guard let project = Shell.glabJSON("projects/\(id)?simple=true") as? [String: Any],
+                  (project["archived"] as? Bool) == true else { return }
+            lock.lock(); archived.insert(id); lock.unlock()
+        }
+        return archived
     }
 
     static func parse(_ m: [String: Any]) -> MergeRequest? {
@@ -59,6 +77,7 @@ enum GitLabModel {
     }
 
     enum MergeResult { case merged, failed(String) }
+    enum CloseResult { case closed, failed(String) }
 
     /// Merges only if GitLab still reports the MR as ready (never trusts the list's stale state).
     static func merge(_ mr: MergeRequest) -> MergeResult {
@@ -79,6 +98,24 @@ enum GitLabModel {
             return .failed("merge failed")
         }
         return .merged
+    }
+
+    /// Closes an open MR after re-checking GitLab. Does not delete the source branch.
+    static func close(_ mr: MergeRequest) -> CloseResult {
+        guard let fresh = Shell.glabJSON("projects/\(mr.projectID)/merge_requests/\(mr.iid)") as? [String: Any] else {
+            return .failed("couldn't load MR")
+        }
+        guard (fresh["state"] as? String) == "opened" else {
+            return .failed("already \((fresh["state"] as? String) ?? "unavailable")")
+        }
+        let r = Shell.run(["glab", "api", "--hostname", "gitlab.com", "-X", "PUT",
+                           "projects/\(mr.projectID)/merge_requests/\(mr.iid)", "-f", "state_event=close"])
+        guard r.status == 0, let d = r.out.data(using: .utf8),
+              let res = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              (res["state"] as? String) == "closed" else {
+            return .failed("close failed")
+        }
+        return .closed
     }
 }
 
