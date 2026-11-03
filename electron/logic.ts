@@ -758,6 +758,8 @@ export interface TracerState {
   closing: string | null;
   prefs: Prefs;
   platform: string;
+  /** From package.json via Electron app.getVersion(). */
+  version: string;
   cli: CliStatus;
   notificationsSupported: boolean;
 }

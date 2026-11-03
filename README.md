@@ -281,6 +281,10 @@ swift run PipelineTracer --self-check
 
 Both apps install to `~/Applications/Pipeline Tracer.app` with the same bundle id and LaunchAgent label, so whichever installer ran last wins. The Electron app does not read the Swift app's UserDefaults, so set your preferences again after switching.
 
+## Version
+
+The shipping version is `package.json` → `version` (currently **0.3.0**). The panel footer shows it as `v0.3.0`. Bump that field before each release you push and package; Electron Builder embeds it so `app.getVersion()` matches.
+
 ## License
 
 [MIT](LICENSE). Copyright 2026 Kristopher Simmons.

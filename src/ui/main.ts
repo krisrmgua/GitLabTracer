@@ -1,6 +1,7 @@
 import {
+  PIPELINE_HOUR_CHOICES,
+  REFRESH_CHOICES,
   cleanLog,
-  DEFAULT_PREFS,
   descriptionSummary,
   formatDuration,
   groupSameChange,
@@ -16,9 +17,7 @@ import {
   mrTone,
   numberLabel,
   pipelineKey,
-  PIPELINE_HOUR_CHOICES,
   refLabel,
-  REFRESH_CHOICES,
   relative,
   serviceName,
   statusTitle,
@@ -33,7 +32,7 @@ import {
   type TracerState,
 } from "../../electron/logic";
 
-interface TracerBridge {
+interface TracerAPI {
   getState: () => Promise<TracerState>;
   refresh: () => Promise<void>;
   setPrefs: (prefs: Partial<Prefs>) => Promise<Prefs>;
@@ -56,133 +55,92 @@ interface TracerBridge {
 
 declare global {
   interface Window {
-    tracer: TracerBridge;
+    tracer: TracerAPI;
   }
 }
+
+const tracer = window.tracer;
 
 const INBOX_WIDTH = 430;
 const WORKSPACE_WIDTH = 620;
 const WORKSPACE_HEIGHT = 540;
 
-type View = "overview" | "settings" | "notifications" | "history" | "pipeline" | "mr";
+const top = document.getElementById("top")!;
+const body = document.getElementById("body")!;
+const content = document.getElementById("content")!;
+const foot = document.getElementById("foot")!;
+const overlay = document.getElementById("overlay")!;
 
-let data: TracerState = {
-  pipelines: [],
-  mrs: [],
-  events: [],
-  refreshing: false,
-  error: null,
-  updated: null,
-  result: null,
-  merging: null,
-  closing: null,
-  prefs: { ...DEFAULT_PREFS },
-  platform: "",
-  cli: { glab: null, gh: null },
-  notificationsSupported: true,
+/* ---------- icons ---------- */
+
+const GLYPHS: Record<string, string> = {
+  success:
+    '<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M4.9 8.2l2 2 4.2-4.4" style="stroke:var(--bg)" stroke-width="1.7"/>',
+  failed:
+    '<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" style="stroke:var(--bg)" stroke-width="1.7"/>',
+  alert:
+    '<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M8 4.3v4.6" style="stroke:var(--bg)" stroke-width="1.8"/><circle cx="8" cy="11.5" r="1.05" style="fill:var(--bg)" stroke="none"/>',
+  running: '<circle cx="8" cy="8" r="6.2" stroke-dasharray="1.6 2.2"/><circle cx="8" cy="8" r="2.6" fill="currentColor" stroke="none"/>',
+  manual: '<circle cx="8" cy="8" r="6.2"/><path d="M6.5 5.5v5M9.5 5.5v5"/>',
+  canceled: '<circle cx="8" cy="8" r="6.2"/><path d="M3.6 12.4l8.8-8.8"/>',
+  skipped: '<circle cx="8" cy="8" r="6.2"/><path d="M5 8h6"/>',
+  clock: '<circle cx="8" cy="8" r="6.2"/><path d="M8 4.6V8l2.4 1.6"/>',
+  xOutline: '<circle cx="8" cy="8" r="6.2"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/>',
+  branch:
+    '<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5.5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 7.1c0 2.4-2.2 3-7 3.8"/>',
+  merge:
+    '<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="12.5" r="1.6"/><path d="M4.5 5.1v5.8M4.5 5.4c0 3.8 7 3.2 7 5.5"/>',
+  pull:
+    '<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="12.5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 10.9V6.5a2 2 0 0 0-2-2H7.5M9 3L7.5 4.5 9 6"/>',
+  chevronLeft: '<path d="M10 3.5L5.5 8l4.5 4.5"/>',
+  chevronRight: '<path d="M6 3.5L10.5 8 6 12.5"/>',
+  chevronDown: '<path d="M3.5 6L8 10.5 12.5 6"/>',
+  chevronUp: '<path d="M3.5 10L8 5.5l4.5 4.5"/>',
+  refresh: '<path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5v3h-3"/>',
+  bell: '<path d="M4 11.5V7.5a4 4 0 0 1 8 0v4l1 1H3z"/><path d="M6.5 14h3"/>',
+  bellBadge: '<path d="M4 11.5V7.5a4 4 0 0 1 6.2-3.3"/><path d="M12 8.5v3l1 1H3l1-1"/><path d="M6.5 14h3"/><circle cx="12.3" cy="4.3" r="1.9" fill="currentColor" stroke="none"/>',
+  bellSlash: '<path d="M4 11.5V7.5a4 4 0 0 1 8 0v4l1 1H3z"/><path d="M6.5 14h3M2.5 2.5l11 11"/>',
+  gear:
+    '<circle cx="8" cy="8" r="2.2"/><circle cx="8" cy="8" r="4.4"/><path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3"/>',
+  external: '<path d="M9 2.5h4.5V7M13.5 2.5l-6 6"/><path d="M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v6.5a1 1 0 0 0 1 1h.5"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  warn: '<path d="M8 2l6.5 11.5h-13z"/><path d="M8 6.5V10M8 11.9v.1"/>',
+  terminal: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2 2-2 2M8 10.5h3.5"/>',
 };
 
-const ui = {
-  view: "overview" as View,
-  pipeline: null as Pipeline | null,
-  group: [] as Pipeline[],
-  groupJobs: new Map<number, Job[]>(),
-  jobs: [] as Job[],
-  loadingJobs: false,
-  loadError: null as string | null,
-  logJob: null as Job | null,
-  logPipeline: null as Pipeline | null,
-  logTab: "Logs" as "Logs" | "Summary",
-  logText: "",
-  loadingLog: false,
-  search: "",
-  mr: null as MergeRequest | null,
-  mrDescription: "",
-  mrAuthor: "",
-  mrLoading: false,
-  mrError: null as string | null,
-  mrJobs: [] as Job[],
-  confirming: null as null | "merge" | "close",
-  expandedHistory: null as string | null,
-  historyJobs: new Map<string, Job[]>(),
-  historyLoading: null as string | null,
-  historyError: null as string | null,
-  showOther: false,
-  eventFilter: "All" as "All" | "Pipelines" | "Merges",
-  token: 0,
-  logToken: 0,
-};
-
-function returnToOverview(): void {
-  ui.token++;
-  ui.logToken++;
-  ui.view = "overview";
-  ui.pipeline = null;
-  ui.group = [];
-  ui.groupJobs = new Map();
-  ui.mr = null;
-  ui.logJob = null;
-  ui.logPipeline = null;
-  ui.confirming = null;
-  ui.loadError = null;
-  ui.jobs = [];
-  ui.loadingJobs = false;
+function icon(name: string, size = 12): string {
+  return `<svg class="i" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GLYPHS[name] ?? ""}</svg>`;
 }
 
-// ---------------------------------------------------------------- rendering helpers
-
-const $ = (id: string) => document.getElementById(id)!;
-
-function esc(s: string): string {
-  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+function tinted(name: string, color: string, size = 12, extra = ""): string {
+  return `<span style="color:${color};display:inline-flex;justify-content:center;flex:0 0 auto;${extra}">${icon(name, size)}</span>`;
 }
 
-let actions: Array<() => void> = [];
-let changes: Array<(value: string, checked: boolean) => void> = [];
-
-/** Click handler attribute for the next render. Handlers are rebuilt on every render. */
-function act(fn: () => void): string {
-  actions.push(fn);
-  return `data-act="${actions.length - 1}"`;
+function statusIcon(status: string): string {
+  switch (status) {
+    case "success":
+    case "passed":
+    case "merged":
+    case "ready":
+      return "success";
+    case "failed":
+      return "failed";
+    case "running":
+      return "running";
+    case "manual":
+      return "manual";
+    case "canceled":
+    case "cancelled":
+      return "canceled";
+    case "skipped":
+      return "skipped";
+    default:
+      return "clock";
+  }
 }
 
-function onChange(fn: (value: string, checked: boolean) => void): string {
-  changes.push(fn);
-  return `data-chg="${changes.length - 1}"`;
-}
-
-const ICONS: Record<string, string> = {
-  checkFill: `<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M4.8 8.2l2.1 2.1 4.3-4.5" stroke="#0e1a29" stroke-width="1.7"/>`,
-  xFill: `<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="#0e1a29" stroke-width="1.7"/>`,
-  exclFill: `<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/><path d="M8 4.4v4.4" stroke="#0e1a29" stroke-width="1.8"/><circle cx="8" cy="11.3" r="1" fill="#0e1a29" stroke="none"/>`,
-  dotted: `<circle cx="8" cy="8" r="6.2" stroke-dasharray="2 2"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/>`,
-  pause: `<circle cx="8" cy="8" r="6.5"/><path d="M6.5 5.6v4.8M9.5 5.6v4.8"/>`,
-  slash: `<circle cx="8" cy="8" r="6.5"/><path d="M4 12L12 4"/>`,
-  minus: `<circle cx="8" cy="8" r="6.5"/><path d="M5 8h6"/>`,
-  clock: `<circle cx="8" cy="8" r="6.5"/><path d="M8 4.6V8l2.3 1.6"/>`,
-  branch: `<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 6.6c0 3-7 2.2-7 4.3"/>`,
-  merge: `<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="10" r="1.6"/><path d="M4.5 5.1v5.8M4.5 5.1c0 3 3 4.9 5.4 4.9"/>`,
-  pull: `<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="12.5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 10.9V6a2 2 0 0 0-2-2H7.5M9 2.5L7.5 4 9 5.5"/>`,
-  refresh: `<path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/>`,
-  bell: `<path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.2H3L4 11z"/><path d="M6.8 13.6a1.3 1.3 0 0 0 2.4 0"/>`,
-  gear: `<circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/>`,
-  chevL: `<path d="M10 3.5L5.5 8l4.5 4.5"/>`,
-  chevR: `<path d="M6 3.5L10.5 8 6 12.5"/>`,
-  chevD: `<path d="M3.5 6l4.5 4.5L12.5 6"/>`,
-  chevU: `<path d="M3.5 10l4.5-4.5 4.5 4.5"/>`,
-  ext: `<path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5"/><path d="M12 9.5v3.5H3V4h3.5"/>`,
-  copy: `<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"/>`,
-  lock: `<rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>`,
-  warn: `<path d="M8 2l6.5 11.5h-13z"/><path d="M8 6.5v3.2"/><circle cx="8" cy="11.6" r=".6" fill="currentColor"/>`,
-  closeCircle: `<circle cx="8" cy="8" r="6.5"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/>`,
-};
-
-function icon(name: string, color?: string, size = 14): string {
-  const style = color ? ` style="color:${color}"` : "";
-  return `<svg class="i" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${style}>${ICONS[name] ?? ""}</svg>`;
-}
-
-function color(status: string): string {
+function tone(status: string): string {
   switch (status) {
     case "success":
     case "passed":
@@ -201,373 +159,464 @@ function color(status: string): string {
   }
 }
 
-function statusIcon(status: string): string {
-  switch (status) {
-    case "success":
-    case "passed":
-    case "merged":
-    case "ready":
-      return "checkFill";
-    case "failed":
-      return "xFill";
-    case "running":
-      return "dotted";
-    case "manual":
-      return "pause";
-    case "canceled":
-    case "cancelled":
-      return "slash";
-    case "skipped":
-      return "minus";
-    default:
-      return "clock";
+/* ---------- view state ---------- */
+
+type Screen = "overview" | "history" | "notifications" | "settings" | "pipeline" | "group" | "mr";
+type EventFilter = "All" | "Pipelines" | "Merges";
+
+let state: TracerState | null = null;
+
+const ui = {
+  screen: "overview" as Screen,
+  pipeline: null as Pipeline | null,
+  group: [] as Pipeline[],
+  groupJobs: new Map<string, Job[]>(),
+  jobs: [] as Job[],
+  loadingJobs: false,
+  loadError: null as string | null,
+  logJob: null as Job | null,
+  logTab: "logs" as "logs" | "summary",
+  logText: "",
+  loadingLog: false,
+  logScrollToEnd: false,
+  search: "",
+  showOther: false,
+  eventFilter: "All" as EventFilter,
+  expandedHistory: null as string | null,
+  historyJobs: new Map<string, Job[]>(),
+  historyLoading: null as string | null,
+  historyError: null as string | null,
+  mr: null as MergeRequest | null,
+  mrBody: "",
+  mrAuthor: "",
+  mrJobs: [] as Job[],
+  mrLoading: false,
+  mrError: null as string | null,
+  mrMissing: false,
+  confirming: null as "merge" | "close" | null,
+};
+
+/** Bumped whenever the screen changes, so a late reply for the old screen is dropped. */
+let requestToken = 0;
+let logToken = 0;
+
+function returnToOverview(): void {
+  requestToken++;
+  logToken++;
+  Object.assign(ui, {
+    screen: "overview",
+    pipeline: null,
+    group: [],
+    groupJobs: new Map(),
+    jobs: [],
+    loadingJobs: false,
+    loadError: null,
+    logJob: null,
+    logText: "",
+    loadingLog: false,
+    logScrollToEnd: false,
+    search: "",
+    expandedHistory: null,
+    historyLoading: null,
+    historyError: null,
+    mr: null,
+    mrBody: "",
+    mrAuthor: "",
+    mrJobs: [],
+    mrLoading: false,
+    mrError: null,
+    mrMissing: false,
+    confirming: null,
+  });
+}
+
+async function call<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch {
+    return null;
   }
 }
 
-const tint = (c: string, pct: number) => `color-mix(in srgb, ${c} ${pct}%, transparent)`;
+/* ---------- helpers ---------- */
+
+function esc(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+const completed = (jobs: Job[]): number => jobs.filter((j) => isDone(j.status)).length;
+const duration = (j: Job, fallback: string): string => (j.duration != null ? formatDuration(j.duration) : fallback);
+const requestNoun = (mr: MergeRequest): string => (mr.host === "github" ? "pull request" : "merge request");
+
+function derived(s: TracerState) {
+  const failureGroups = groupSameChange(unresolvedFailures(s.pipelines));
+  const activeGroups = groupSameChange(s.pipelines.filter((p) => isRunning(p) || p.status === "manual"));
+  const finished = s.pipelines.filter(isSuccess);
+  const other = s.pipelines.filter((p) => ["canceled", "cancelled", "skipped"].includes(p.status));
+  const mergedEvents = s.events.filter((e) => e.status === "merged");
+  return { failureGroups, activeGroups, finished, other, mergedEvents };
+}
+
+function findPipeline(key: string): Pipeline | null {
+  const live = state?.pipelines.find((p) => pipelineKey(p) === key);
+  if (live) return live;
+  if (ui.pipeline && pipelineKey(ui.pipeline) === key) return ui.pipeline;
+  return ui.group.find((p) => pipelineKey(p) === key) ?? null;
+}
+
+/** First non-empty job list this panel already has for a pipeline. */
+function knownJobs(key: string): Job[] {
+  const lists = [
+    ui.pipeline && pipelineKey(ui.pipeline) === key ? ui.jobs : [],
+    ui.groupJobs.get(key) ?? [],
+    ui.historyJobs.get(key) ?? [],
+    findPipeline(key)?.jobs ?? [],
+  ];
+  return lists.find((l) => l.length) ?? [];
+}
+
+/* ---------- small pieces ---------- */
+
+function countLabel(n: number, color: string): string {
+  return `<span class="count" style="color:${color};background:color-mix(in srgb, ${color} 10%, transparent)">${n}</span>`;
+}
 
 function badge(text: string, status: string): string {
-  const c = color(status);
-  return `<span class="badge" style="color:${c};background:${tint(c, 12)}">${icon(statusIcon(status), c, 11)}${esc(text)}</span>`;
+  const c = tone(status);
+  return `<span class="badge" style="color:${c};background:color-mix(in srgb, ${c} 12%, transparent)">${icon(statusIcon(status), 11)}${esc(text)}</span>`;
 }
 
-function countLabel(n: number, c: string): string {
-  return `<span class="count" style="color:${c};background:${tint(c, 10)}">${n}</span>`;
+function heading(title: string, count: number, color: string, glyph: string): string {
+  return `<div class="heading">${tinted(glyph, color, 12, "width:16px")}<span>${esc(title)}</span>${countLabel(count, color)}</div>`;
 }
 
-function heading(title: string, n: number, c: string, iconName: string): string {
-  return `<div class="heading">${icon(iconName, c, 13)}<span>${esc(title)}</span>${countLabel(n, c)}</div>`;
+function panel(rows: string[]): string {
+  return `<div class="panel">${rows.join('<div class="divider"></div>')}</div>`;
 }
 
-function panel(items: string[]): string {
-  return `<div class="panel">${items.join(`<div class="divider"></div>`)}</div>`;
+const empty = (text: string): string => `<div class="empty">${esc(text)}</div>`;
+
+function loading(text: string): string {
+  return `<div class="note" style="display:flex;align-items:center;gap:6px"><span class="spinner"></span><span>${esc(text)}</span></div>`;
 }
 
-const empty = (text: string) => `<div class="empty">${esc(text)}</div>`;
-const flex = `<span style="flex:1"></span>`;
-const completed = (jobs: Job[]) => jobs.filter((j) => isDone(j.status)).length;
-const duration = (j: Job) => (j.duration != null ? formatDuration(j.duration) : null);
+function warnLine(text: string): string {
+  return `<div class="note" style="display:flex;align-items:flex-start;gap:6px;color:var(--orange)">${icon("warn", 11)}<span>${esc(text)}</span></div>`;
+}
 
-function open(url: string): void {
-  void window.tracer.openExternal(url);
+function meta(k: string, v: string): string {
+  return `<div class="meta"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+}
+
+function openButton(url: string, label: string): string {
+  return `<button type="button" class="icon-btn" style="color:var(--cyan)" data-act="open" data-url="${esc(url)}" title="${esc(label)}">${icon("external", 14)}</button>`;
 }
 
 function ring(p: Pipeline): string {
+  const c = tone(p.status);
   const done = completed(p.jobs);
   const progress = p.jobs.length ? done / p.jobs.length : isSuccess(p) ? 1 : 0;
-  const c = color(p.status);
   const r = 11.5;
   const circ = 2 * Math.PI * r;
   const arc =
     progress > 0
-      ? `<circle cx="13" cy="13" r="${r}" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(circ * progress).toFixed(2)} ${circ.toFixed(2)}"/>`
+      ? `<circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(circ * progress).toFixed(2)} ${circ.toFixed(2)}"/>`
       : "";
-  const label = p.jobs.length ? `<span class="label" style="color:${c}">${done}/${p.jobs.length}</span>` : icon(statusIcon(p.status), c, 10);
+  const label = p.jobs.length
+    ? `<span class="label" style="color:${c}">${done}/${p.jobs.length}</span>`
+    : tinted(statusIcon(p.status), c, 10);
   const aria = p.jobs.length ? `${p.status}, ${done} of ${p.jobs.length} jobs finished` : `${p.status}, job details not loaded`;
-  return `<span class="ring" aria-label="${esc(aria)}"><svg class="r" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="${r}" fill="none" stroke="${c}" stroke-opacity="0.22" stroke-width="3"/>${arc}</svg>${label}</span>`;
+  return `<span class="ring" role="img" aria-label="${esc(aria)}"><svg class="r" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-opacity="0.22" stroke-width="3"/>${arc}</svg>${label}</span>`;
 }
 
-// ---------------------------------------------------------------- derived lists
+function jobRow(j: Job, key: string, small = false): string {
+  return `<div class="jobrow${small ? " small" : ""}">
+    ${tinted(statusIcon(j.status), tone(j.status), 12, "width:15px")}
+    <span class="name" title="${esc(j.name)}">${esc(j.name)}</span>
+    <span class="dur">${esc(duration(j, small ? "—" : statusTitle(j.status)))}</span>
+    <button type="button" class="inline" data-act="log" data-key="${esc(key)}" data-job="${j.id}">View logs</button>
+  </div>`;
+}
 
-const failureGroups = () => groupSameChange(unresolvedFailures(data.pipelines));
-const activeGroups = () => groupSameChange(data.pipelines.filter((p) => isRunning(p) || p.status === "manual"));
-const finished = () => data.pipelines.filter(isSuccess);
-const otherCompletions = () => data.pipelines.filter((p) => ["canceled", "cancelled", "skipped"].includes(p.status));
-const mergedEvents = () => data.events.filter((e) => e.status === "merged");
+/* ---------- rows ---------- */
 
-// ---------------------------------------------------------------- rows
-
-function pipelineRow(p: Pipeline, expandHistory = false): string {
-  const lead = isFailed(p) ? `<span class="fail-icon">${icon("exclFill", "var(--red)", 23)}</span>` : ring(p);
+function pipelineRow(p: Pipeline, history = false): string {
+  const key = pipelineKey(p);
+  const failedJob = isFailed(p) ? p.jobs.find((j) => j.status === "failed") : undefined;
+  const lead = isFailed(p) ? `<span class="fail-icon" style="color:var(--red)">${icon("alert", 23)}</span>` : ring(p);
   const progress = isRunning(p)
     ? `<span class="progress-count mono">${p.jobs.length ? `${completed(p.jobs)}/${p.jobs.length}` : "—"}</span><span class="vrule"></span>`
     : "";
   const title = isFailed(p) ? "Pipeline failed" : p.workflow || `Pipeline #${p.id}`;
-  const failedJob = isFailed(p) ? p.jobs.find((j) => j.status === "failed") : undefined;
   const tip = `${p.project} #${p.id} · ${refLabel(p)} · ${statusTitle(p.status)}`;
-  return `<button class="row" title="${esc(tip)}" ${act(() => (expandHistory ? void toggleHistory(p) : void select(p)))}>
+  const chev = history && ui.expandedHistory === key ? "chevronDown" : "chevronRight";
+  return `<button type="button" class="row" data-act="${history ? "history-toggle" : "pipeline"}" data-key="${esc(key)}" title="${esc(tip)}">
     ${lead}${progress}
     <span class="main">
       <span class="t">${esc(title)}</span>
       <span class="s">${esc(`${p.project} · ${refLabel(p)}`)}</span>
       ${failedJob ? `<span class="s">${esc(failedJob.name)} failed</span>` : ""}
     </span>
-    <span class="when">${relative(p.updated)}</span>
-    <span class="chev">${icon("chevR", undefined, 10)}</span>
+    <span class="when">${esc(relative(p.updated))}</span>
+    <span class="chev">${icon(chev, 10)}</span>
   </button>`;
 }
 
 function groupRow(g: PipelineGroup): string {
   if (g.pipelines.length === 1) return pipelineRow(g.pipelines[0]);
   const branch = g.pipelines.find((p) => mergeRequestIID(p) == null);
-  const mr = g.pipelines.find((p) => mergeRequestIID(p) != null);
-  const iid = mr ? mergeRequestIID(mr) : 0;
-  const when = Math.max(...g.pipelines.map((p) => p.updated ?? 0)) || null;
-  const states = [mr ? `MR !${iid} · ${statusTitle(mr.status)}` : "", branch ? `branch · ${statusTitle(branch.status)}` : ""]
-    .filter(Boolean)
-    .join("&nbsp;&nbsp;");
-  return `<button class="row" ${act(() => void selectGroup(g.pipelines))}>
+  const mrPipe = g.pipelines.find((p) => mergeRequestIID(p) != null);
+  const iid = mrPipe ? mergeRequestIID(mrPipe) : null;
+  const times = g.pipelines.map((p) => p.updated).filter((t): t is number => t != null);
+  const when = times.length ? Math.max(...times) : null;
+  const states = [
+    mrPipe ? esc(`MR !${iid} · ${statusTitle(mrPipe.status)}`) : "",
+    branch ? esc(`branch · ${statusTitle(branch.status)}`) : "",
+  ].filter(Boolean);
+  return `<button type="button" class="row" data-act="group" data-keys="${esc(g.pipelines.map(pipelineKey).join(","))}">
     ${ring(g.primary)}
     <span class="main">
       <span class="t">${esc(groupTitle(g.pipelines))}</span>
-      <span class="s">${esc(`${g.primary.project} · MR !${iid}`)}</span>
-      <span class="s">${states}</span>
+      <span class="s">${esc(`${g.primary.project} · MR !${iid ?? 0}`)}</span>
+      <span class="s">${states.join("&emsp;")}</span>
     </span>
-    <span class="when">${relative(when)}</span>
-    <span class="chev">${icon("chevR", undefined, 10)}</span>
+    <span class="when">${esc(relative(when))}</span>
+    <span class="chev">${icon("chevronRight", 10)}</span>
   </button>`;
 }
 
 function mrRow(mr: MergeRequest): string {
-  const c = color(mrTone(mr));
-  return `<button class="row" title="${esc(`${numberLabel(mr)} ${mr.title} — ${mrState(mr)}`)}" ${act(() => void showMR(mr))}>
-    <span style="width:22px;display:inline-flex;justify-content:center">${icon("branch", c, 19)}</span>
+  const c = tone(mrTone(mr));
+  const st = mrState(mr);
+  return `<button type="button" class="row" data-act="mr" data-key="${esc(mrKey(mr))}" title="${esc(`${numberLabel(mr)} ${mr.title} — ${st}`)}">
+    ${tinted("branch", c, 19, "width:22px")}
     <span class="main">
-      <span class="t">${esc(`${numberLabel(mr)}  ${mr.title}`)}</span>
+      <span class="t">${esc(numberLabel(mr))}&ensp;${esc(mr.title)}</span>
       <span class="s">${esc(mr.project)}</span>
     </span>
-    <span class="when" style="color:${c}">${esc(mrState(mr))}</span>
-    <span class="chev">${icon("chevR", undefined, 10)}</span>
+    <span class="when" style="color:${c}">${esc(st)}</span>
+    <span class="chev">${icon("chevronRight", 10)}</span>
   </button>`;
 }
 
-function jobRow(job: Job, onLogs: () => void, small = false): string {
-  const c = color(job.status);
-  return `<div class="jobrow${small ? " small" : ""}">
-    ${icon(statusIcon(job.status), c, small ? 12 : 15)}
-    <span class="name" title="${esc(job.name)}">${esc(job.name)}</span>
-    <span class="dur">${esc(duration(job) ?? (small ? "—" : statusTitle(job.status)))}</span>
-    <button class="inline" ${act(onLogs)}>View logs</button>
-  </div>`;
-}
+/* ---------- screens ---------- */
 
-// ---------------------------------------------------------------- views
-
-function overview(): string {
+function renderOverview(s: TracerState): string {
+  const { failureGroups, activeGroups, finished, other, mergedEvents } = derived(s);
+  const firstLoad = s.refreshing && s.updated == null;
   const parts: string[] = [];
-  if (data.error) parts.push(`<div class="banner">${icon("warn", "var(--orange)", 13)}<span>${esc(data.error)}</span></div>`);
-  if (data.result) parts.push(`<div class="note">${esc(data.result)}</div>`);
-  const failures = failureGroups();
-  if (failures.length) {
-    parts.push(heading("Attention needed", failures.length, "var(--red)", "pull"));
-    parts.push(panel(failures.map(groupRow)));
+  if (s.error) parts.push(`<div class="banner">${icon("warn", 13)}<span>${esc(s.error)}</span></div>`);
+  if (s.result) parts.push(`<div class="note">${esc(s.result)}</div>`);
+
+  if (failureGroups.length) {
+    parts.push(heading("Attention needed", failureGroups.length, "var(--red)", "pull"));
+    parts.push(panel(failureGroups.map(groupRow)));
   }
-  const active = activeGroups();
-  const loading = data.refreshing && data.updated == null;
-  parts.push(heading("Active", active.length, "var(--cyan)", "branch"));
-  parts.push(panel(active.length ? active.map(groupRow) : [empty(loading ? "Loading pipelines…" : "No active pipelines")]));
-  parts.push(heading("Requests", data.mrs.length, "var(--cyan)", "pull"));
-  parts.push(panel(data.mrs.length ? data.mrs.map(mrRow) : [empty(loading ? "Loading requests…" : "No open requests")]));
-  const recentCount = finished().length + mergedEvents().length;
+
+  parts.push(heading("In progress", activeGroups.length, "var(--cyan)", "branch"));
+  parts.push(panel(activeGroups.length ? activeGroups.map(groupRow) : [empty(firstLoad ? "Loading pipelines…" : "No active pipelines")]));
+
+  parts.push(heading("Requests", s.mrs.length, "var(--cyan)", "pull"));
+  parts.push(panel(s.mrs.length ? s.mrs.map(mrRow) : [empty(firstLoad ? "Loading requests…" : "No open requests")]));
+
   parts.push(
     panel([
-      `<button class="row" style="padding:10px" ${act(() => {
-        ui.view = "history";
-        render();
-      })}>${icon("checkFill", "var(--green)")}<span class="section-label">Recent successes</span>${countLabel(recentCount, "var(--green)")}${flex}${icon("chevD", undefined, 11)}</button>`,
+      `<button type="button" class="row" data-act="history" style="padding:10px">
+        ${tinted("success", "var(--green)", 13)}
+        <span class="section-label">Recent successes</span>
+        ${countLabel(finished.length + mergedEvents.length, "var(--green)")}
+        <span style="flex:1"></span>
+        <span class="chev">${icon("chevronDown", 11)}</span>
+      </button>`,
     ]),
   );
-  const other = otherCompletions();
+
   if (other.length) {
-    const toggle = `<button class="row" style="padding:10px" ${act(() => {
-      ui.showOther = !ui.showOther;
-      render();
-    })}><span class="section-label">Canceled &amp; skipped</span>${countLabel(other.length, "var(--muted)")}${flex}${icon(ui.showOther ? "chevU" : "chevD", undefined, 11)}</button>`;
-    parts.push(panel(ui.showOther ? [toggle, ...other.map((p) => pipelineRow(p))] : [toggle]));
+    const rows = [
+      `<button type="button" class="row" data-act="toggle-other" style="padding:10px" aria-expanded="${ui.showOther}">
+        <span class="section-label">Canceled &amp; skipped</span>
+        ${countLabel(other.length, "var(--muted)")}
+        <span style="flex:1"></span>
+        <span class="chev">${icon(ui.showOther ? "chevronUp" : "chevronDown", 11)}</span>
+      </button>`,
+    ];
+    if (ui.showOther) rows.push(...other.map((p) => pipelineRow(p)));
+    parts.push(panel(rows));
   }
+
   return `<div class="stack">${parts.join("")}</div>`;
 }
 
-function historyView(): string {
-  const list = finished().slice(0, 30);
-  const merged = mergedEvents();
-  const items: string[] = [];
-  for (const p of list) {
+function renderHistory(s: TracerState): string {
+  const { finished, mergedEvents } = derived(s);
+  const rows: string[] = [];
+  for (const p of finished.slice(0, 30)) {
     const key = pipelineKey(p);
     let row = pipelineRow(p, true);
     if (ui.expandedHistory === key) {
-      if (ui.historyLoading) row += `<div style="padding:8px"><span class="spinner"></span></div>`;
-      if (ui.historyError) row += `<div class="note" style="color:var(--orange);padding:8px">${esc(ui.historyError)}</div>`;
-      for (const job of ui.historyJobs.get(key) ?? p.jobs) {
-        row += jobRow(
-          job,
-          () => {
-            void select(p);
-            void loadLog(job, p);
-          },
-          true,
-        );
-      }
+      if (ui.historyLoading === key) row += `<div style="padding:8px 10px">${loading("Loading jobs…")}</div>`;
+      if (ui.historyError) row += `<div style="padding:8px 10px">${warnLine(ui.historyError)}</div>`;
+      row += (ui.historyJobs.get(key) ?? p.jobs).map((j) => jobRow(j, key, true)).join("");
     }
-    items.push(row);
+    rows.push(row);
   }
-  for (const ev of merged) {
-    items.push(`<button class="row" style="padding:10px" ${act(() => open(ev.url))}>
-      ${icon("merge", "var(--green)")}
-      <span class="main"><span class="t" style="font-weight:500">${esc(ev.title)}</span><span class="s">${esc(ev.detail)}</span></span>
-      <span class="tiny">${relative(ev.date)}</span>
+  for (const e of mergedEvents) {
+    rows.push(`<button type="button" class="row" data-act="open" data-url="${esc(e.url)}" style="padding:10px">
+      ${tinted("merge", "var(--green)", 14)}
+      <span class="main"><span class="t" style="font-weight:500">${esc(e.title)}</span><span class="s">${esc(e.detail)}</span></span>
+      <span class="tiny">${esc(relative(e.date))}</span>
     </button>`);
   }
-  if (!items.length) items.push(empty("No recent completions"));
   return `<div class="stack wide">
-    <div class="panel"><button class="row" style="padding:10px" ${act(() => {
-      ui.view = "overview";
-      render();
-    })}>${icon("checkFill", "var(--green)")}<span class="section-label">Recent successes</span>${countLabel(list.length + merged.length, "var(--green)")}${flex}${icon("chevU", undefined, 11)}</button></div>
-    <div class="tiny">${data.prefs.pipelineHours}-hour pipeline window · merge events from this session</div>
-    ${panel(items)}
+    ${panel([
+      `<button type="button" class="row" data-act="back" style="padding:10px">
+        ${tinted("success", "var(--green)", 13)}
+        <span class="section-label">Recent successes</span>
+        ${countLabel(finished.length + mergedEvents.length, "var(--green)")}
+        <span style="flex:1"></span>
+        <span class="chev">${icon("chevronUp", 11)}</span>
+      </button>`,
+    ])}
+    <div class="tiny">${s.prefs.pipelineHours}-hour pipeline window · merge events from this session</div>
+    ${panel(rows.length ? rows : [empty("No recent completions")])}
   </div>`;
 }
 
-function isMergeEvent(e: ActivityEvent): boolean {
-  return e.url.includes("/merge_requests/") || e.url.includes("/pull/") || e.title.startsWith("Merge");
+const isMergeEvent = (e: ActivityEvent): boolean =>
+  e.url.includes("/merge_requests/") || e.url.includes("/pull/") || e.title.startsWith("Merge");
+const eventProject = (e: ActivityEvent): string => e.detail.split(" ")[0] || "Pipeline Tracer";
+const isConnectionEvent = (e: ActivityEvent): boolean => e.title.toLowerCase().includes("connection");
+
+function eventLabel(e: ActivityEvent): string {
+  if (isConnectionEvent(e)) return "Retry";
+  if (e.url.includes("/merge_requests/")) return "View MR";
+  if (e.url.includes("/pull/")) return "View PR";
+  if (e.url.includes("/jobs/")) return "View logs";
+  return "View pipeline";
 }
 
-function eventProject(e: ActivityEvent): string {
-  return e.detail.split(" ")[0] || "Pipeline Tracer";
-}
-
-function activateEvent(e: ActivityEvent): void {
-  const p = data.pipelines.find((x) => x.url === e.url || x.jobs.some((j) => j.url === e.url));
-  if (!p) {
-    open(e.url);
-    return;
-  }
-  void select(p);
-  const failedJob = p.jobs.find((j) => j.status === "failed");
-  if (e.status === "failed" && failedJob) void loadLog(failedJob, p);
-}
-
-function tabBar<T extends string>(items: Array<[T, string]>, current: T, set: (v: T) => void): string {
+function tabs(items: Array<[string, string]>, selected: string, act: string): string {
   return `<div class="tabs">${items
     .map(
-      ([key, title]) =>
-        `<button class="tab${key === current ? " active" : ""}" ${act(() => {
-          set(key);
-          render();
-        })}>${esc(title)}</button>`,
+      ([key, label]) =>
+        `<button type="button" class="tab${key === selected ? " active" : ""}" data-act="${act}" data-value="${esc(key)}">${esc(label)}</button>`,
     )
     .join("")}</div>`;
 }
 
-function notificationsView(): string {
-  const events = data.events.filter((e) =>
-    ui.eventFilter === "All" ? true : ui.eventFilter === "Merges" ? isMergeEvent(e) : !isMergeEvent(e),
+function renderNotifications(s: TracerState): string {
+  const events = s.events.filter(
+    (e) => ui.eventFilter === "All" || (ui.eventFilter === "Merges" ? isMergeEvent(e) : !isMergeEvent(e)),
   );
-  const parts: string[] = [
-    tabBar<"All" | "Pipelines" | "Merges">(
+  const parts = [
+    tabs(
       [
         ["All", "All"],
         ["Pipelines", "Pipelines"],
         ["Merges", "Merges"],
       ],
       ui.eventFilter,
-      (v) => (ui.eventFilter = v),
+      "filter",
     ),
   ];
-  if (!events.length) parts.push(empty("No notifications this session"));
+  if (!events.length) parts.push(panel([empty("No notifications this session")]));
   const projects = [...new Set(events.map(eventProject))];
   for (const project of projects) {
-    parts.push(`<div class="note" style="font-weight:600">${esc(project)}</div>`);
+    parts.push(`<div class="tiny" style="font-size:10px;font-weight:600">${esc(project)}</div>`);
     parts.push(
       panel(
         events
           .filter((e) => eventProject(e) === project)
-          .map((e) => {
-            const retry = e.title.toLowerCase().includes("connection");
-            const label = retry
-              ? "Retry"
-              : e.url.includes("/merge_requests/")
-                ? "View MR"
-                : e.url.includes("/pull/")
-                  ? "View PR"
-                  : e.url.includes("/jobs/")
-                    ? "View logs"
-                    : "View pipeline";
-            const c = color(e.status);
-            return `<div class="event${e.status === "failed" ? " failed" : ""}">
-              <span style="width:22px;display:inline-flex;justify-content:center">${icon(statusIcon(e.status), c)}</span>
-              <span class="main" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+          .map(
+            (e) => `<div class="event${e.status === "failed" ? " failed" : ""}">
+              ${tinted(statusIcon(e.status), tone(e.status), 15, "width:22px")}
+              <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
                 <span class="t">${esc(e.title)}</span>
                 <span class="s">${esc(e.detail)}</span>
               </span>
               <span class="side">
-                <span class="tiny">${relative(e.date)}</span>
-                <button class="inline" ${act(() => (retry ? void window.tracer.refresh() : activateEvent(e)))}>${label}</button>
+                <span class="tiny">${esc(relative(e.date))}</span>
+                <button type="button" class="inline" data-act="${isConnectionEvent(e) ? "refresh" : "event"}" data-id="${esc(e.id)}">${eventLabel(e)}</button>
               </span>
-            </div>`;
-          }),
+            </div>`,
+          ),
       ),
     );
   }
-  parts.push(`<div class="tiny">This session · failures alert with sound; routine successes stay quiet</div>`);
+  parts.push('<div class="tiny">This session · failures alert with sound; routine successes stay quiet</div>');
   return `<div class="stack wide">${parts.join("")}</div>`;
 }
 
-function prefToggle(title: string, value: boolean, set: (v: boolean) => void): string {
-  return `<label class="pref"><span class="label">${esc(title)}</span><input type="checkbox" class="switch" ${value ? "checked" : ""} ${onChange((_v, checked) => set(checked))} /></label>`;
+function toggle(key: keyof Prefs, label: string, on: boolean): string {
+  return `<label class="pref"><span class="label">${esc(label)}</span><input type="checkbox" class="switch" data-pref="${key}"${on ? " checked" : ""} /></label>`;
 }
 
-function prefChoice(title: string, options: number[], value: number, suffix: (n: number) => string, set: (v: number) => void): string {
-  const opts = options.map((o) => `<option value="${o}" ${o === value ? "selected" : ""}>${esc(suffix(o))}</option>`).join("");
-  return `<div class="pref"><span class="label">${esc(title)}</span><select class="select" ${onChange((v) => set(Number(v)))}>${opts}</select></div>`;
+function choice(key: keyof Prefs, label: string, options: number[], value: number, suffix: string): string {
+  const opts = options
+    .map((o) => `<option value="${o}"${o === value ? " selected" : ""}>${o} ${esc(suffix)}</option>`)
+    .join("");
+  return `<label class="pref"><span class="label">${esc(label)}</span><select class="select" data-pref="${key}">${opts}</select></label>`;
 }
 
-const setPrefs = (p: Partial<Prefs>) => void window.tracer.setPrefs(p);
-
-function cliRow(name: string, found: string | null): string {
+function cliRow(name: string, path: string | null): string {
   return `<div class="cli-row">
-    <span style="width:34px;font-weight:600">${name}</span>
-    ${found ? icon("checkFill", "var(--green)", 12) : icon("xFill", "var(--orange)", 12)}
-    <span class="path mono">${esc(found ?? "Not found on PATH")}</span>
+    ${tinted("terminal", path ? "var(--green)" : "var(--orange)", 12)}
+    <span class="mono" style="width:30px;flex:0 0 30px">${esc(name)}</span>
+    <span class="path">${esc(path ?? "Not found on PATH or the usual install folders")}</span>
+    <span class="${path ? "ok-text" : "bad-text"}">${path ? "Found" : "Missing"}</span>
   </div>`;
 }
 
-function settingsView(): string {
-  const prefs = data.prefs;
-  const isWin = data.platform === "win32";
-  const missing = !data.cli.glab || !data.cli.gh;
-  const install = isWin ? "winget install glab.glab GitHub.cli" : "brew install glab gh";
+function renderSettings(s: TracerState): string {
+  const p = s.prefs;
+  const windows = s.platform === "win32";
+  const mac = s.platform === "darwin";
+  const supported = s.notificationsSupported;
+  const banner = mac
+    ? "Failures are titled Pipeline Tracer and play a sound. macOS chooses the banner colors. Click a banner to open its page."
+    : "Failures are titled Pipeline Tracer, play a sound, and stay until you dismiss them. Click a notification to open its page.";
   return `<div class="stack wide">
     <div class="section-label">Panel</div>
-    ${panel([prefToggle("Reopen where I left off", prefs.rememberPlace, (v) => setPrefs({ rememberPlace: v }))])}
+    ${panel([toggle("rememberPlace", "Reopen where I left off", p.rememberPlace)])}
     <div class="section-label">Pipelines</div>
     ${panel([
-      prefChoice("Refresh interval", REFRESH_CHOICES, prefs.refreshSeconds, (n) => `${n} seconds`, (v) => setPrefs({ refreshSeconds: v })),
-      prefChoice("Completion history", PIPELINE_HOUR_CHOICES, prefs.pipelineHours, (n) => (n === 1 ? "1 hour" : `${n} hours`), (v) =>
-        setPrefs({ pipelineHours: v }),
-      ),
-      prefToggle("Show merge actions", prefs.mergeButton, (v) => setPrefs({ mergeButton: v })),
+      choice("refreshSeconds", "Refresh interval", REFRESH_CHOICES, p.refreshSeconds, "seconds"),
+      choice("pipelineHours", "Completion history", PIPELINE_HOUR_CHOICES, p.pipelineHours, "hours"),
+      toggle("mergeButton", "Show merge actions", p.mergeButton),
     ])}
-    ${isWin ? `<div class="section-label">System</div>${panel([prefToggle("Start at login", prefs.startAtLogin, (v) => setPrefs({ startAtLogin: v }))])}` : ""}
-    <div class="section-label">Command-line tools</div>
-    ${panel([
-      cliRow("glab", data.cli.glab),
-      cliRow("gh", data.cli.gh),
-      `<div class="cli-row"><span class="note">${
-        missing
-          ? `Install with <span class="mono">${esc(install)}</span>, then <span class="mono">glab auth login --hostname gitlab.com</span> and <span class="mono">gh auth login --hostname github.com</span>. Either one is enough.`
-          : "Tokens stay with glab and gh. Pipeline Tracer never stores them."
-      }</span></div>`,
-    ])}
+    ${
+      windows
+        ? `<div class="section-label">Startup</div>${panel([toggle("startAtLogin", "Start at login", p.startAtLogin)])}`
+        : mac
+          ? '<div class="tiny">Login start on macOS is the LaunchAgent that scripts/install.sh writes.</div>'
+          : ""
+    }
     <div class="section-label">Notifications</div>
     ${panel([
       `<div class="stack" style="padding:10px">
-        <div style="display:flex;gap:6px;align-items:center;color:var(--cyan)">${icon("bell", "var(--cyan)", 12)}<span>Failures alert · successes stay quiet</span></div>
-        ${data.notificationsSupported ? "" : `<div class="note" style="color:var(--orange)">Notifications are not supported on this system.</div>`}
-        <div class="note">Failures are titled Pipeline Tracer and play a sound. Click a banner to open its GitLab or GitHub page.</div>
+        <div style="display:flex;align-items:center;gap:6px;color:var(--cyan)">${icon("bellBadge", 12)}<span>Failures alert · successes stay quiet</span></div>
+        <div class="note" style="display:flex;align-items:center;gap:6px;color:${supported ? "var(--green)" : "var(--orange)"}">${icon(supported ? "success" : "bellSlash", 11)}<span>${supported ? "Notifications available on this system" : "Notifications are not supported here"}</span></div>
+        <div class="note">${esc(banner)}</div>
         <div style="display:flex;gap:6px">
-          <button class="inline" ${act(() => void window.tracer.openNotificationSettings())}>Notification settings</button>
-          <button class="inline" ${data.notificationsSupported ? "" : "disabled"} ${act(() => void window.tracer.testNotification())}>Send test</button>
+          <button type="button" class="inline" data-act="notification-settings">Notification settings</button>
+          <button type="button" class="inline" data-act="notification-test"${supported ? "" : " disabled"}>Send test</button>
         </div>
       </div>`,
     ])}
-    <div style="display:flex;justify-content:flex-end"><button class="inline" ${act(() => void window.tracer.quit())}>Quit Pipeline Tracer</button></div>
+    <div class="section-label">Command-line tools</div>
+    ${panel([cliRow("glab", s.cli.glab), cliRow("gh", s.cli.gh)])}
+    <div class="tiny">Tracer runs glab and gh directly. They own the GitLab and GitHub tokens; Tracer never stores one.</div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="inline" data-act="quit">Quit Pipeline Tracer</button></div>
   </div>`;
 }
 
-function stageStatus(jobs: Job[], stage: string): string {
-  const statuses = jobs.filter((j) => j.stage === stage).map((j) => j.status);
+function stageStatus(jobs: Job[]): string {
+  const statuses = jobs.map((j) => j.status);
   if (statuses.includes("failed")) return "failed";
   if (statuses.includes("running")) return "running";
   if (statuses.includes("manual")) return "manual";
@@ -579,27 +628,27 @@ function stageStatus(jobs: Job[], stage: string): string {
 
 function stageTrack(jobs: Job[]): string {
   const stages = [...new Set(jobs.map((j) => j.stage))];
-  const pieces = stages.map((stage, index) => {
+  const pieces = stages.map((stage) => {
     const list = jobs.filter((j) => j.stage === stage);
-    const status = stageStatus(jobs, stage);
-    const column = `<div class="stage">${icon(statusIcon(status), color(status), 24)}<span class="name">${esc(stage)}</span><span class="jobs">${completed(list)}/${list.length} jobs</span></div>`;
-    return (index > 0 ? `<div class="link"></div>` : "") + column;
+    const status = stageStatus(list);
+    return `<div class="stage">
+      ${tinted(statusIcon(status), tone(status), 24)}
+      <span class="name">${esc(stage)}</span>
+      <span class="jobs">${completed(list)}/${list.length} jobs</span>
+    </div>`;
   });
-  return `<div class="stage-track"><div class="inner">${pieces.join("")}</div></div>`;
+  return `<div class="stage-track" data-scroll="stages"><div class="inner">${pieces.join('<span class="link"></span>')}</div></div>`;
 }
 
-function visibleLog(): string {
-  if (!ui.search) return ui.logText;
-  const needle = ui.search.toLowerCase();
-  return ui.logText
-    .split("\n")
-    .filter((l) => l.toLowerCase().includes(needle))
-    .join("\n");
+function visibleLines(): string[] {
+  const lines = ui.logText.split("\n");
+  if (!ui.search) return lines;
+  const q = ui.search.toLowerCase();
+  return lines.filter((l) => l.toLowerCase().includes(q));
 }
 
-function formattedLog(): string {
-  return visibleLog()
-    .split("\n")
+function logHtml(lines: string[]): string {
+  return lines
     .map((line) => {
       const lower = line.toLowerCase();
       return lower.includes("error") || lower.includes("fail") ? `<span class="bad">${esc(line)}</span>` : esc(line);
@@ -607,360 +656,454 @@ function formattedLog(): string {
     .join("\n");
 }
 
-const logCount = () => `Log snapshot · latest 250,000 characters · ${visibleLog().split("\n").length} visible lines`;
+const logCount = (n: number): string => `Log snapshot · latest 250,000 characters · ${n} visible lines`;
 
-function logView(p: Pipeline, job: Job): string {
-  const c = color(job.status);
+function renderLog(p: Pipeline, job: Job): string {
+  const service = serviceName(p);
+  const jobURL = job.url || p.url;
   const head = panel([
-    `<div class="jobrow" style="padding:10px">${icon(statusIcon(job.status), c)}<span class="name" style="font-weight:600">${esc(job.name)}</span><span class="dur">${esc(duration(job) ?? "")}</span><button class="inline" ${act(() => {
-      ui.logToken++;
-      ui.logJob = null;
-      ui.logPipeline = null;
-      ui.loadError = null;
-      ui.loadingLog = false;
-      render();
-    })}>All jobs</button></div>`,
+    `<div class="jobrow">
+      ${tinted(statusIcon(job.status), tone(job.status), 12, "width:15px")}
+      <span class="name" style="font-weight:600">${esc(job.name)}</span>
+      <span class="dur">${esc(duration(job, ""))}</span>
+      <button type="button" class="inline" data-act="all-jobs">All jobs</button>
+    </div>`,
   ]);
-  const tabs = tabBar<"Logs" | "Summary">(
+  const tabBar = tabs(
     [
-      ["Logs", "Logs"],
-      ["Summary", "Job summary"],
+      ["logs", "Logs"],
+      ["summary", "Job summary"],
     ],
     ui.logTab,
-    (v) => (ui.logTab = v),
+    "log-tab",
   );
-  if (ui.logTab === "Logs") {
-    return `${head}${tabs}
-      <div class="log-tools">
-        <input id="log-search" class="search" placeholder="Search logs…" value="${esc(ui.search)}" />
-        <button class="inline" ${ui.loadingLog || !ui.logText ? "disabled" : ""} ${act(() => void window.tracer.copy(ui.logText))}>${icon("copy", undefined, 11)}Copy</button>
-        <button class="inline" ${act(() => open(job.url))}>${icon("ext", undefined, 11)}${serviceName(p)}</button>
-      </div>
-      ${ui.loadingLog ? `<div class="note"><span class="spinner"></span> Loading log…</div>` : ""}
-      <pre class="log" id="log-pre">${formattedLog()}</pre>
-      <div class="tiny" id="log-count">${logCount()}</div>`;
+  if (ui.logTab === "summary") {
+    return `${head}${tabBar}
+      ${panel([
+        `<div class="stack wide" style="padding:12px">
+          ${meta("Job", job.name)}
+          ${meta("Stage", job.stage)}
+          ${meta("Status", statusTitle(job.status))}
+          ${meta("Duration", duration(job, "Not reported"))}
+        </div>`,
+      ])}
+      <div style="display:flex"><button type="button" class="action" data-act="open" data-url="${esc(jobURL)}">Open job on ${service}</button></div>`;
   }
-  const meta = (k: string, v: string) => `<div class="meta"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
-  return `${head}${tabs}
-    ${panel([
-      `<div class="stack wide" style="padding:12px">${meta("Job", job.name)}${meta("Stage", job.stage)}${meta("Status", statusTitle(job.status))}${meta("Duration", duration(job) ?? "Not reported")}</div>`,
-    ])}
-    <button class="action" ${act(() => open(job.url))}>Open job on ${serviceName(p)}</button>`;
+  const lines = visibleLines();
+  const copyOff = ui.loadingLog || !ui.logText ? " disabled" : "";
+  return `${head}${tabBar}
+    <div class="log-tools">
+      <input id="log-search" class="search" type="search" placeholder="Search logs…" spellcheck="false" value="${esc(ui.search)}" />
+      <button type="button" class="inline" data-act="copy-log"${copyOff}>${icon("copy", 10)}Copy</button>
+      <button type="button" class="inline" data-act="open" data-url="${esc(jobURL)}">${icon("external", 10)}${service}</button>
+    </div>
+    ${ui.loadingLog ? loading("Loading log…") : ""}
+    <pre class="log" id="log-text" data-scroll="log">${logHtml(lines)}</pre>
+    <div class="tiny" id="log-count">${logCount(lines.length)}</div>`;
 }
 
-function pipelineDetail(p: Pipeline): string {
-  const parts: string[] = [
+function renderPipeline(p: Pipeline): string {
+  const key = pipelineKey(p);
+  const service = serviceName(p);
+  const parts = [
     `<div class="detail-head">
       <div class="main">
-        <span class="t">${esc(`#${p.id}  ${p.project}`)}</span>
+        <span class="t">#${p.id}&ensp;${esc(p.project)}</span>
         <span class="s">${esc(`${refLabel(p)} · ${relative(p.updated)}`)}</span>
       </div>
       ${badge(statusTitle(p.status), p.status)}
-      <button class="icon-btn" title="Open pipeline on ${serviceName(p)}" ${act(() => open(p.url))}>${icon("ext", "var(--cyan)")}</button>
+      ${openButton(p.url, `Open pipeline on ${service}`)}
     </div>`,
   ];
-  if (ui.loadError) parts.push(`<div class="note" style="color:var(--orange)">${icon("warn", "var(--orange)", 11)} ${esc(ui.loadError)}</div>`);
+  if (ui.loadError) parts.push(warnLine(ui.loadError));
+  if (ui.loadingJobs && !ui.logJob) parts.push(loading("Loading jobs…"));
   if (ui.logJob) {
-    parts.push(logView(p, ui.logJob));
-  } else {
-    if (ui.loadingJobs) parts.push(`<div class="note"><span class="spinner"></span> Loading jobs…</div>`);
-    if (ui.jobs.length) {
-      parts.push(stageTrack(ui.jobs));
-      parts.push(
-        `<div style="display:flex"><span class="section-label" style="font-size:11px">Jobs (${ui.jobs.length})</span>${flex}<span class="note">${completed(ui.jobs)} finished</span></div>`,
-      );
-      parts.push(panel(ui.jobs.map((job) => jobRow(job, () => void loadLog(job, p)))));
-    } else if (!ui.loadingJobs && !ui.loadError) {
-      parts.push(empty(`No jobs available · Open ${serviceName(p)} for details`));
-    }
+    parts.push(renderLog(p, ui.logJob));
+  } else if (ui.jobs.length) {
+    parts.push(stageTrack(ui.jobs));
+    parts.push(`<div style="display:flex;align-items:center;gap:8px">
+      <span class="section-label" style="font-size:11px">Jobs (${ui.jobs.length})</span>
+      <span style="flex:1"></span>
+      <span class="note">${completed(ui.jobs)} finished</span>
+    </div>`);
+    parts.push(panel(ui.jobs.map((j) => jobRow(j, key))));
+  } else if (!ui.loadingJobs && !ui.loadError) {
+    parts.push(panel([empty(`No jobs available · Open ${service} for details`)]));
   }
   return `<div class="stack wide">${parts.join("")}</div>`;
 }
 
-function groupDetail(pipelines: Pipeline[]): string {
-  const parts: string[] = [
-    `<div class="stack" style="gap:4px"><span class="t" style="font-size:13px;white-space:normal">${esc(groupTitle(pipelines))}</span><span class="s">${esc(pipelines[0].project)} · one change, two GitLab pipelines</span></div>`,
-  ];
-  if (ui.loadError) parts.push(`<div class="note" style="color:var(--orange)">${icon("warn", "var(--orange)", 11)} ${esc(ui.loadError)}</div>`);
-  for (const p of pipelines) {
-    const jobs = ui.groupJobs.get(p.id) ?? p.jobs;
+function renderGroup(): string {
+  const ps = ui.group;
+  const sections = ps.map((p) => {
+    const key = pipelineKey(p);
+    const jobs = ui.groupJobs.get(key) ?? p.jobs;
     const iid = mergeRequestIID(p);
-    parts.push(`<div class="stack" style="gap:8px">
-      <div style="display:flex;align-items:center;gap:6px">
+    return `<div class="stack">
+      <div style="display:flex;align-items:center;gap:8px">
         <span class="section-label" style="font-size:11px">${iid == null ? "Branch" : `MR !${iid}`}</span>
-        <span class="note mono">#${p.id}</span>${flex}
+        <span class="mono note">#${p.id}</span>
+        <span style="flex:1"></span>
         ${badge(statusTitle(p.status), p.status)}
-        <button class="icon-btn" ${act(() => open(p.url))}>${icon("ext", "var(--cyan)")}</button>
+        ${openButton(p.url, `Open pipeline on ${serviceName(p)}`)}
       </div>
       <div class="s">${esc(iid == null ? p.ref : `refs/merge-requests/${iid}/head`)}</div>
-      ${ui.loadingJobs && !jobs.length ? `<div class="note"><span class="spinner"></span> Loading jobs…</div>` : ""}
-      ${jobs.length ? panel(jobs.map((job) => jobRow(job, () => void loadLog(job, p)))) : ""}
-    </div>`);
-  }
-  return `<div class="stack wide">${parts.join("")}</div>`;
+      ${ui.loadingJobs && !jobs.length ? loading("Loading jobs…") : ""}
+      ${jobs.length ? panel(jobs.map((j) => jobRow(j, key))) : ""}
+    </div>`;
+  });
+  return `<div class="stack wide">
+    <div class="detail-head"><div class="main">
+      <span class="t">${esc(groupTitle(ps))}</span>
+      <span class="s">${esc(ps[0]?.project ?? "")} · one change, two GitLab pipelines</span>
+    </div></div>
+    ${ui.loadError ? warnLine(ui.loadError) : ""}
+    ${sections.join("")}
+  </div>`;
 }
 
-function mrWorkspace(mr: MergeRequest): string {
-  const list = data.mrs
+function renderWorkspace(s: TracerState, mr: MergeRequest): string {
+  const key = mrKey(mr);
+  const items = s.mrs
     .map((item) => {
-      const c = color(mrTone(item));
-      return `<button class="mr-item${mrKey(item) === mrKey(mr) ? " selected" : ""}" ${act(() => void showMR(item))}>
-        ${icon("branch", c)}
-        <span class="main" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-          <span class="t">${esc(`${numberLabel(item)}  ${item.title}`)}</span>
+      const c = tone(mrTone(item));
+      return `<button type="button" class="mr-item${mrKey(item) === key ? " selected" : ""}" data-act="mr" data-key="${esc(mrKey(item))}">
+        ${tinted("branch", c, 13, "padding-top:1px")}
+        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+          <span class="t">${esc(numberLabel(item))}&ensp;${esc(item.title)}</span>
           <span class="tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(item.project)}</span>
           <span class="tiny" style="color:${c}">${esc(mrState(item))}</span>
         </span>
       </button>`;
     })
     .join("");
-  const isGitHub = mr.host === "github";
-  const meta = (k: string, v: string) => `<div class="meta"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
-  const pipeStatus = mr.pipelineStatus ?? "pending";
-  const checks = panel([
-    `<div class="jobrow" style="padding:10px">${icon(statusIcon(pipeStatus), color(pipeStatus))}<span class="name" style="font-weight:500">${isGitHub ? "Checks" : "Pipeline"}: ${esc(statusTitle(mr.pipelineStatus ?? "not reported"))}</span></div>`,
+
+  const gh = mr.host === "github";
+  const busy = s.merging != null || s.closing != null;
+  const error =
+    ui.mrError ??
+    (ui.mrMissing
+      ? `This ${requestNoun(mr)} is no longer in the open list. Refresh or open ${gh ? "GitHub" : "GitLab"}.`
+      : null);
+  const pipe = mr.pipelineStatus ?? "pending";
+  const checks = [
+    `<div class="jobrow">
+      ${tinted(statusIcon(pipe), tone(pipe), 12, "width:15px")}
+      <span class="name" style="font-weight:500">${gh ? "Checks" : "Pipeline"}: ${esc(statusTitle(mr.pipelineStatus ?? "not reported"))}</span>
+    </div>`,
     ...ui.mrJobs.map(
-      (job) =>
-        `<div class="jobrow" style="padding:7px 10px;font-size:10px">${icon(statusIcon(job.status), color(job.status), 12)}<span class="name" style="font-size:10px">${esc(job.name)}</span><span class="dur">${esc(duration(job) ?? "—")}</span></div>`,
+      (j) => `<div class="jobrow" style="padding:7px 10px">
+        ${tinted(statusIcon(j.status), tone(j.status), 11, "width:15px")}
+        <span class="name" style="font-size:10px" title="${esc(j.name)}">${esc(j.name)}</span>
+        <span class="dur">${esc(duration(j, "—"))}</span>
+      </div>`,
     ),
-  ]);
-  const busy = data.merging != null || data.closing != null;
-  const ready = isReady(mr);
-  const mergeDisabled = !ready || busy || ui.mrLoading || ui.mrError != null;
-  const mergeButton = data.prefs.mergeButton
-    ? `<button class="action primary" ${mergeDisabled ? "disabled" : ""} ${act(() => {
-        ui.confirming = "merge";
-        render();
-      })}>${ready ? "" : icon("lock", undefined, 10)}${data.merging === mrKey(mr) ? "Merging…" : "Merge"}</button>`
+  ];
+  const mergeOff = !isReady(mr) || busy || ui.mrLoading || error != null;
+  const closeOff = busy || ui.mrLoading;
+  const mergeButton = s.prefs.mergeButton
+    ? `<button type="button" class="action primary" data-act="merge-ask"${mergeOff ? " disabled" : ""}>${isReady(mr) ? "" : icon("lock", 10)}${s.merging === key ? "Merging…" : "Merge"}</button>`
     : "";
-  const closeLabel = data.closing === mrKey(mr) ? "Closing…" : isGitHub ? "Close PR" : "Close MR";
-  const closeButton = `<button class="action fit" ${busy || ui.mrLoading ? "disabled" : ""} ${act(() => {
-    ui.confirming = "close";
-    render();
-  })}>${closeLabel}</button>`;
-  const readyLine = data.prefs.mergeButton
-    ? `<div class="note ${ready ? "ok-text" : "bad-text"}" style="font-weight:500">${ready ? "Ready to merge." : `Merge unavailable: ${esc(mrState(mr))}.`}</div>`
-    : "";
-  return `<div class="workspace-grid">
-    <div class="list" data-scroll="mr-list">
-      <div class="heading" style="padding-bottom:8px"><span>Requests</span>${countLabel(data.mrs.length, "var(--cyan)")}</div>
-      ${list}
-    </div>
-    <div class="detail" data-scroll="mr-detail">
-      <div class="stack wide">
-        <div class="detail-head">
-          ${icon("branch", "var(--cyan)")}
-          <div class="main"><span class="t" style="font-size:13px">${esc(`${numberLabel(mr)}  ${mr.title}`)}</span><span class="s">${esc(mr.project)}</span></div>
-          <button class="icon-btn" title="${isGitHub ? "Open pull request on GitHub" : "Open merge request in GitLab"}" ${act(() => open(mr.url))}>${icon("ext")}</button>
-        </div>
-        ${badge(mrState(mr), mrTone(mr))}
-        ${ui.mrLoading ? `<div class="note"><span class="spinner"></span> Loading ${isGitHub ? "pull" : "merge"} request…</div>` : ""}
-        ${ui.mrError ? `<div class="note" style="color:var(--orange)">${esc(ui.mrError)}</div>` : ""}
-        ${ui.mrDescription ? `<div class="description">${esc(descriptionSummary(ui.mrDescription))}</div>` : ""}
-        <div class="stack" style="gap:10px">
-          ${meta("Source", mr.sourceBranch || "Not reported")}
-          ${meta("Target", mr.targetBranch || "Not reported")}
-          ${ui.mrAuthor ? meta("Author", ui.mrAuthor) : ""}
-        </div>
-        ${checks}
-        <div style="display:flex;gap:8px">${mergeButton}${closeButton}</div>
-        ${readyLine}
+  const closeLabel = s.closing === key ? "Closing…" : gh ? "Close PR" : "Close MR";
+
+  const detail = [
+    `<div class="detail-head">
+      ${tinted("branch", "var(--cyan)", 14, "padding-top:1px")}
+      <div class="main">
+        <span class="t" style="font-size:13px">${esc(numberLabel(mr))}&ensp;${esc(mr.title)}</span>
+        <span class="s">${esc(mr.project)}</span>
       </div>
+      ${openButton(mr.url, gh ? "Open pull request on GitHub" : "Open merge request in GitLab")}
+    </div>`,
+    badge(mrState(mr), mrTone(mr)),
+    ui.mrLoading ? loading(gh ? "Loading pull request…" : "Loading merge request…") : "",
+    error ? warnLine(error) : "",
+    ui.mrBody ? `<div class="description">${esc(descriptionSummary(ui.mrBody))}</div>` : "",
+    `<div class="stack">
+      ${meta("Source", mr.sourceBranch || "Not reported")}
+      ${meta("Target", mr.targetBranch || "Not reported")}
+      ${ui.mrAuthor ? meta("Author", ui.mrAuthor) : ""}
+    </div>`,
+    panel(checks),
+    `<div style="display:flex;gap:8px">
+      ${mergeButton}
+      <button type="button" class="action${s.prefs.mergeButton ? " fit" : ""}" data-act="close-ask"${closeOff ? " disabled" : ""}>${closeLabel}</button>
+    </div>`,
+    s.prefs.mergeButton
+      ? `<div class="note ${isReady(mr) ? "ok-text" : "bad-text"}" style="font-weight:500">${esc(
+          isReady(mr) ? "Ready to merge." : `Merge unavailable: ${mrState(mr)}.`,
+        )}</div>`
+      : "",
+  ];
+
+  return `<div class="workspace-grid">
+    <div class="list" data-scroll="mr-list" data-sticky>
+      <div class="heading" style="padding:0 2px 8px">Requests ${countLabel(s.mrs.length, "var(--cyan)")}</div>
+      ${items || empty("No open requests")}
     </div>
+    <div class="detail" data-scroll="mr-detail"><div class="stack wide">${detail.filter(Boolean).join("")}</div></div>
   </div>`;
 }
 
-function confirmation(mr: MergeRequest): string {
-  const isGitHub = mr.host === "github";
-  const cancel = `<button class="action" ${act(() => {
-    ui.confirming = null;
-    render();
-  })}>Cancel</button>`;
-  if (ui.confirming === "merge") {
-    return `<div class="confirm" role="dialog" aria-modal="true">
-      ${icon("merge", "var(--cyan)", 25)}
-      <h2>${isGitHub ? "Merge pull request?" : "Merge request?"}</h2>
-      <p>Merge ${esc(numberLabel(mr))} in ${esc(mr.project)}</p>
-      <div class="sub mono">${esc(`${mr.sourceBranch} → ${mr.targetBranch}`)}</div>
-      <div class="buttons">${cancel}<button class="action primary" id="confirm-ok" ${act(() => {
-        ui.confirming = null;
-        void window.tracer.merge(mrKey(mr), mr.sha);
-        render();
-      })}>Merge</button></div>
-    </div>`;
+function renderScreen(s: TracerState): string {
+  switch (ui.screen) {
+    case "settings":
+      return renderSettings(s);
+    case "notifications":
+      return renderNotifications(s);
+    case "history":
+      return renderHistory(s);
+    case "group":
+      return ui.group.length ? renderGroup() : renderOverview(s);
+    case "pipeline":
+      return ui.pipeline ? renderPipeline(ui.pipeline) : renderOverview(s);
+    case "mr":
+      return ui.mr ? renderWorkspace(s, ui.mr) : renderOverview(s);
+    default:
+      return renderOverview(s);
   }
-  return `<div class="confirm warn" role="dialog" aria-modal="true">
-    ${icon("closeCircle", "var(--orange)", 25)}
-    <h2>${isGitHub ? "Close pull request?" : "Close merge request?"}</h2>
-    <p>Close ${esc(numberLabel(mr))} in ${esc(mr.project)}</p>
-    <div class="sub">Leaves the source branch as-is. This does not delete anything.</div>
-    <div class="buttons">${cancel}<button class="action primary" id="confirm-ok" ${act(() => {
-      ui.confirming = null;
-      void window.tracer.close(mrKey(mr), mr.sha);
-      render();
-    })}>${isGitHub ? "Close PR" : "Close MR"}</button></div>
-  </div>`;
 }
 
 function screenTitle(): string {
-  if (ui.logJob) return "Job logs";
-  if (ui.view === "pipeline" && ui.group.length > 1) return groupTitle(ui.group);
-  if (ui.view === "mr") return ui.mr?.host === "github" ? "Pull request" : "Merge request";
-  if (ui.view === "pipeline") return "Pipeline";
-  if (ui.view === "settings") return "Preferences";
-  if (ui.view === "notifications") return "Notifications";
-  if (ui.view === "history") return "Recent successes";
-  return "Pipeline Tracer";
+  switch (ui.screen) {
+    case "pipeline":
+      return ui.logJob ? "Job logs" : "Pipeline";
+    case "group":
+      return groupTitle(ui.group);
+    case "mr":
+      return ui.mr?.host === "github" ? "Pull request" : "Merge request";
+    case "settings":
+      return "Preferences";
+    case "notifications":
+      return "Notifications";
+    case "history":
+      return "Recent successes";
+    default:
+      return "Pipeline Tracer";
+  }
 }
 
-function header(): string {
+function renderTop(s: TracerState | null): string {
   const title = screenTitle();
   const lead =
-    ui.view === "overview"
-      ? `<div class="title">${esc(title)}</div>`
-      : `<button class="back" title="Back" ${act(() => {
-          returnToOverview();
-          render();
-        })}>${icon("chevL", undefined, 12)}<span style="overflow:hidden;text-overflow:ellipsis">${esc(title)}</span></button>`;
-  return `${lead}<div class="spacer"></div>
-    ${data.refreshing ? `<span class="spinner"></span>` : ""}
-    <button class="icon-btn" title="Refresh" ${act(() => void window.tracer.refresh())}>${icon("refresh")}</button>
-    <button class="icon-btn" title="Notifications" ${act(() => {
-      returnToOverview();
-      ui.view = "notifications";
-      render();
-    })}>${icon("bell")}</button>
-    <button class="icon-btn" title="Preferences" ${act(() => {
-      returnToOverview();
-      ui.view = "settings";
-      render();
-    })}>${icon("gear")}</button>`;
+    ui.screen === "overview"
+      ? `<span class="title">${esc(title)}</span>`
+      : `<button type="button" class="back" data-act="back" title="Back">${icon("chevronLeft", 12)}<span style="overflow:hidden;text-overflow:ellipsis">${esc(title)}</span></button>`;
+  return `${lead}
+    <span class="spacer"></span>
+    ${s?.refreshing ? '<span class="spinner" role="status" aria-label="Refreshing"></span>' : ""}
+    <button type="button" class="icon-btn" data-act="refresh" title="Refresh">${icon("refresh", 14)}</button>
+    <button type="button" class="icon-btn" data-act="notifications" title="Notifications">${icon("bell", 14)}</button>
+    <button type="button" class="icon-btn" data-act="settings" title="Preferences">${icon("gear", 14)}</button>`;
 }
 
-function footer(): string {
-  const when = data.updated
-    ? `Updated ${new Date(data.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+function renderFoot(s: TracerState | null): string {
+  const updated = s?.updated
+    ? `Updated ${new Date(s.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
     : "Connecting…";
-  return `<span>${esc(when)}</span><span>${data.mrs.length} MRs · ${activeGroups().length} active</span>`;
+  const ver = s?.version ? `v${s.version} · ` : "";
+  const counts = s ? `${s.mrs.length} MRs · ${derived(s).activeGroups.length} active` : "";
+  return `<span>${esc(ver + updated)}</span><span>${esc(counts)}</span>`;
 }
 
-function body(): string {
-  switch (ui.view) {
-    case "settings":
-      return settingsView();
-    case "notifications":
-      return notificationsView();
-    case "history":
-      return historyView();
-    case "mr":
-      return ui.mr ? mrWorkspace(ui.mr) : overview();
-    case "pipeline":
-      if (ui.logJob && ui.logPipeline) return pipelineDetail(ui.logPipeline);
-      if (ui.group.length > 1) return groupDetail(ui.group);
-      return ui.pipeline ? pipelineDetail(ui.pipeline) : overview();
-    default:
-      return overview();
+function renderOverlay(): void {
+  const mr = ui.mr;
+  if (!ui.confirming || !mr || ui.screen !== "mr") {
+    overlay.classList.add("hidden");
+    setHTML(overlay, "");
+    return;
   }
+  const gh = mr.host === "github";
+  const where = `${numberLabel(mr)} in ${mr.project}`;
+  const html =
+    ui.confirming === "merge"
+      ? `<div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          ${tinted("merge", "var(--cyan)", 25)}
+          <h2 id="confirm-title">${gh ? "Merge pull request?" : "Merge request?"}</h2>
+          <p>Merge ${esc(where)}</p>
+          <div class="sub mono">${esc(`${mr.sourceBranch} → ${mr.targetBranch}`)}</div>
+          <div class="buttons">
+            <button type="button" class="action" id="confirm-cancel" data-act="confirm-cancel">Cancel</button>
+            <button type="button" class="action primary" data-act="confirm-merge">Merge</button>
+          </div>
+        </div>`
+      : `<div class="confirm warn" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          ${tinted("xOutline", "var(--orange)", 25)}
+          <h2 id="confirm-title">${gh ? "Close pull request?" : "Close merge request?"}</h2>
+          <p>Close ${esc(where)}</p>
+          <div class="sub">Leaves the source branch as-is. This does not delete anything.</div>
+          <div class="buttons">
+            <button type="button" class="action" id="confirm-cancel" data-act="confirm-cancel">Cancel</button>
+            <button type="button" class="action primary" data-act="confirm-close">${gh ? "Close PR" : "Close MR"}</button>
+          </div>
+        </div>`;
+  const opening = overlay.classList.contains("hidden");
+  setHTML(overlay, html);
+  overlay.classList.remove("hidden");
+  if (opening) document.getElementById("confirm-cancel")?.focus();
 }
+
+/* ---------- render loop ---------- */
+
+const rendered = new WeakMap<HTMLElement, string>();
+
+/** Skips identical markup so a refresh tick does not reset scroll, focus, or a pressed button. */
+function setHTML(el: HTMLElement, html: string): boolean {
+  if (rendered.get(el) === html) return false;
+  el.innerHTML = html;
+  rendered.set(el, html);
+  return true;
+}
+
+function screenKey(): string {
+  return [ui.screen, ui.pipeline ? pipelineKey(ui.pipeline) : "", ui.logJob?.id ?? "", ui.mr ? mrKey(ui.mr) : ""].join("|");
+}
+
+let lastScreenKey = "";
 
 function render(): void {
-  actions = [];
-  changes = [];
-  const focused = document.activeElement as HTMLInputElement | null;
-  const focusId = focused?.id || null;
-  const caret = focused && "selectionStart" in focused ? focused.selectionStart : null;
-  const scrolls = new Map<string, number>();
-  document.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => scrolls.set(el.dataset.scroll!, el.scrollTop));
-  const oldPre = document.getElementById("log-pre");
+  const s = state;
+  setHTML(top, renderTop(s));
+  setHTML(foot, renderFoot(s));
 
-  $("top").innerHTML = header();
-  const content = $("content");
-  content.className = ui.view === "mr" && ui.mr ? "workspace" : "";
-  content.innerHTML = body();
-  $("foot").innerHTML = footer();
+  const key = screenKey();
+  const same = key === lastScreenKey;
+  lastScreenKey = key;
+  content.classList.toggle("workspace", !!s && ui.screen === "mr" && !!ui.mr);
 
-  // Keep the existing log node when its text is unchanged, so a background refresh does not
-  // drop the reader's scroll position or text selection.
-  const newPre = document.getElementById("log-pre");
-  if (oldPre && newPre && oldPre.innerHTML === newPre.innerHTML) newPre.replaceWith(oldPre);
-
-  const overlay = $("overlay");
-  if (ui.confirming && ui.mr) {
-    overlay.innerHTML = confirmation(ui.mr);
-    overlay.classList.remove("hidden");
-  } else {
-    overlay.innerHTML = "";
-    overlay.classList.add("hidden");
-  }
-
-  document.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
-    const top = scrolls.get(el.dataset.scroll!);
-    if (top != null) el.scrollTop = top;
+  const scrolls = new Map<string, [number, number]>();
+  content.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
+    scrolls.set(el.dataset.scroll!, [el.scrollTop, el.scrollLeft]);
   });
-  if (focusId) {
-    const el = document.getElementById(focusId) as HTMLInputElement | null;
-    if (el) {
-      el.focus();
-      if (caret != null && "setSelectionRange" in el) el.setSelectionRange(caret, caret);
+  const focused = document.activeElement as HTMLInputElement | null;
+  const focusId = focused && content.contains(focused) && focused.id ? focused.id : null;
+  const selection = focusId && focused?.type === "search" ? [focused.selectionStart, focused.selectionEnd] : null;
+  const bodyTop = body.scrollTop;
+
+  const changed = setHTML(content, s ? renderScreen(s) : empty("Connecting…"));
+  if (changed) {
+    content.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
+      const saved = scrolls.get(el.dataset.scroll!);
+      if (saved && (same || el.hasAttribute("data-sticky"))) [el.scrollTop, el.scrollLeft] = saved;
+    });
+    body.scrollTop = same ? bodyTop : 0;
+    if (focusId) {
+      const el = document.getElementById(focusId) as HTMLInputElement | null;
+      el?.focus();
+      if (el && selection) el.setSelectionRange(selection[0], selection[1]);
     }
+  } else if (!same) {
+    body.scrollTop = 0;
   }
-  if (ui.confirming) document.getElementById("confirm-ok")?.focus();
-  fit();
+
+  if (ui.logScrollToEnd && !ui.loadingLog) {
+    const pre = document.getElementById("log-text");
+    if (pre) pre.scrollTop = pre.scrollHeight;
+    ui.logScrollToEnd = false;
+  }
+
+  renderOverlay();
+  requestFit();
 }
 
-function fit(): void {
-  requestAnimationFrame(() => {
-    if (ui.view === "mr" && ui.mr) {
-      void window.tracer.fit(WORKSPACE_WIDTH, WORKSPACE_HEIGHT);
+let fitFrame = 0;
+
+function requestFit(): void {
+  cancelAnimationFrame(fitFrame);
+  fitFrame = requestAnimationFrame(() => {
+    if (ui.screen === "mr" && ui.mr) {
+      void call(tracer.fit(WORKSPACE_WIDTH, WORKSPACE_HEIGHT));
       return;
     }
-    const height = $("top").offsetHeight + $("content").getBoundingClientRect().height + $("foot").offsetHeight + 2;
-    void window.tracer.fit(INBOX_WIDTH, Math.ceil(height));
+    const height = top.offsetHeight + content.offsetHeight + foot.offsetHeight + 2;
+    void call(tracer.fit(INBOX_WIDTH, Math.ceil(height)));
   });
 }
 
-// ---------------------------------------------------------------- loaders
+/* ---------- loading ---------- */
 
-async function select(p: Pipeline): Promise<void> {
-  returnToOverview();
-  ui.view = "pipeline";
-  ui.pipeline = p;
-  ui.jobs = p.jobs;
-  ui.loadingJobs = true;
-  const token = ++ui.token;
-  render();
-  const jobs = await window.tracer.jobs(pipelineKey(p), false);
-  if (token !== ui.token) return;
+async function loadJobs(p: Pipeline, quiet: boolean): Promise<void> {
+  const token = ++requestToken;
+  if (!quiet) {
+    ui.loadingJobs = true;
+    render();
+  }
+  // A running pipeline keeps its status while its jobs move, so its cache is skipped.
+  const jobs = await call(tracer.jobs(pipelineKey(p), quiet || isRunning(p)));
+  if (token !== requestToken) return;
   ui.loadingJobs = false;
   if (jobs) ui.jobs = jobs;
-  else ui.loadError = `Couldn’t load jobs. Check ${serviceName(p)} access or open in browser.`;
+  else if (!quiet) ui.loadError = `Couldn’t load jobs. Check ${serviceName(p)} access or open in browser.`;
   render();
+}
+
+function selectPipeline(p: Pipeline): void {
+  returnToOverview();
+  ui.screen = "pipeline";
+  ui.pipeline = p;
+  ui.jobs = p.jobs;
+  void loadJobs(p, false);
 }
 
 async function selectGroup(pipelines: Pipeline[]): Promise<void> {
+  if (pipelines.length === 1) return selectPipeline(pipelines[0]);
   returnToOverview();
-  ui.view = "pipeline";
+  ui.screen = "group";
   ui.group = pipelines;
-  ui.pipeline = pipelines[0];
-  for (const p of pipelines) ui.groupJobs.set(p.id, p.jobs);
+  for (const p of pipelines) ui.groupJobs.set(pipelineKey(p), p.jobs);
   ui.loadingJobs = true;
-  const token = ++ui.token;
+  const token = ++requestToken;
   render();
-  const results = await Promise.all(pipelines.map((p) => window.tracer.jobs(pipelineKey(p), false)));
-  if (token !== ui.token) return;
+  const results = await Promise.all(pipelines.map((p) => call(tracer.jobs(pipelineKey(p), isRunning(p)))));
+  if (token !== requestToken) return;
   ui.loadingJobs = false;
-  let loaded = 0;
   results.forEach((jobs, i) => {
-    if (!jobs) return;
-    ui.groupJobs.set(pipelines[i].id, jobs);
-    loaded++;
+    if (jobs) ui.groupJobs.set(pipelineKey(pipelines[i]), jobs);
   });
-  if (loaded !== pipelines.length) ui.loadError = "Couldn’t load every pipeline. Open the missing one in the browser.";
+  if (results.some((r) => r == null)) ui.loadError = "Couldn’t load every pipeline. Open the missing one in the browser.";
   render();
 }
 
-async function toggleHistory(p: Pipeline): Promise<void> {
-  const key = pipelineKey(p);
+async function loadLog(job: Job, p: Pipeline): Promise<void> {
+  ui.logJob = job;
+  ui.logTab = "logs";
+  ui.search = "";
+  ui.logText = "";
+  ui.loadingLog = true;
+  ui.loadError = null;
+  const token = ++logToken;
+  render();
+  const text = await call(tracer.log(pipelineKey(p), job));
+  if (token !== logToken) return;
+  ui.loadingLog = false;
+  if (text == null) {
+    ui.loadError = `Couldn’t load log. Open this job on ${serviceName(p)}.`;
+  } else {
+    ui.logText = cleanLog(text);
+    if (!ui.logText.trim()) ui.logText = "No log output yet.";
+    ui.logScrollToEnd = true;
+  }
+  render();
+}
+
+/** Opens a job log from any screen; the pipeline detail becomes the screen behind it. */
+function openLog(key: string, jobID: number): void {
+  const p = findPipeline(key);
+  const jobs = knownJobs(key);
+  const job = jobs.find((j) => j.id === jobID);
+  if (!p || !job) return;
+  if (ui.screen !== "pipeline" || !ui.pipeline || pipelineKey(ui.pipeline) !== key) {
+    returnToOverview();
+    ui.screen = "pipeline";
+    ui.pipeline = p;
+    ui.jobs = jobs;
+  }
+  void loadLog(job, p);
+}
+
+async function toggleHistory(key: string): Promise<void> {
+  const p = findPipeline(key);
+  if (!p) return;
   if (ui.expandedHistory === key) {
     ui.expandedHistory = null;
     render();
@@ -970,7 +1113,7 @@ async function toggleHistory(p: Pipeline): Promise<void> {
   ui.historyError = null;
   ui.historyLoading = key;
   render();
-  const jobs = await window.tracer.jobs(key, false);
+  const jobs = await call(tracer.jobs(key, false));
   if (ui.expandedHistory !== key) return;
   ui.historyLoading = null;
   if (jobs) ui.historyJobs.set(key, jobs);
@@ -978,41 +1121,19 @@ async function toggleHistory(p: Pipeline): Promise<void> {
   render();
 }
 
-async function loadLog(job: Job, p: Pipeline): Promise<void> {
-  ui.logJob = job;
-  ui.logPipeline = p;
-  ui.logTab = "Logs";
-  ui.search = "";
-  ui.logText = "";
-  ui.loadingLog = true;
-  ui.loadError = null;
-  const token = ++ui.logToken;
-  render();
-  const text = await window.tracer.log(pipelineKey(p), job);
-  if (token !== ui.logToken) return;
-  ui.loadingLog = false;
-  if (text == null) ui.loadError = `Couldn’t load log. Open this job on ${serviceName(p)}.`;
-  else ui.logText = cleanLog(text) || "No log output yet.";
-  render();
-}
-
 async function showMR(mr: MergeRequest): Promise<void> {
-  ui.view = "mr";
+  returnToOverview();
+  ui.screen = "mr";
   ui.mr = mr;
-  ui.confirming = null;
-  ui.mrError = null;
-  ui.mrJobs = [];
-  ui.mrDescription = "";
-  ui.mrAuthor = "";
   ui.mrLoading = true;
-  const token = ++ui.token;
+  const token = ++requestToken;
   render();
-  const detail = await window.tracer.mrDetail(mrKey(mr));
-  if (token !== ui.token) return;
+  const detail = await call(tracer.mrDetail(mrKey(mr)));
+  if (token !== requestToken) return;
   ui.mrLoading = false;
   if (detail) {
     ui.mr = detail.request;
-    ui.mrDescription = detail.body;
+    ui.mrBody = detail.body;
     ui.mrAuthor = detail.author;
     ui.mrJobs = detail.jobs;
   } else {
@@ -1024,74 +1145,236 @@ async function showMR(mr: MergeRequest): Promise<void> {
   render();
 }
 
-// ---------------------------------------------------------------- wiring
+async function finishConfirm(kind: "merge" | "close"): Promise<void> {
+  const mr = ui.mr;
+  ui.confirming = null;
+  render();
+  if (!mr) return;
+  // The SHA shown in this view goes along, so a push since then blocks the merge.
+  const ok = await call(kind === "merge" ? tracer.merge(mrKey(mr), mr.sha) : tracer.close(mrKey(mr), mr.sha));
+  if (ok) return;
+  if (ui.mr && mrKey(ui.mr) === mrKey(mr)) {
+    ui.mrError =
+      kind === "merge" && state && !state.prefs.mergeButton
+        ? "Merge actions are off in Preferences."
+        : `Couldn’t start that. This ${requestNoun(mr)} is no longer in the open list; refresh and try again.`;
+    render();
+  }
+}
 
-function applyState(next: TracerState): void {
-  data = next;
-  const current = ui.mr;
-  if (ui.view === "mr" && current && !ui.mrLoading && !ui.confirming) {
-    const fresh = data.mrs.find((m) => mrKey(m) === mrKey(current));
-    if (!fresh) {
-      const kind = current.host === "github" ? "pull request" : "merge request";
-      ui.mrError = `This ${kind} is no longer in the open list. Refresh or open ${current.host === "github" ? "GitHub" : "GitLab"}.`;
-    } else {
-      ui.mr = fresh.pipelineStatus == null ? { ...fresh, pipelineStatus: current.pipelineStatus } : fresh;
+function activateEvent(id: string): void {
+  const event = state?.events.find((e) => e.id === id);
+  if (!event) return;
+  const p = state?.pipelines.find((x) => x.url === event.url || x.jobs.some((j) => j.url === event.url));
+  if (!p) {
+    void call(tracer.openExternal(event.url));
+    return;
+  }
+  selectPipeline(p);
+  const failed = event.status === "failed" ? p.jobs.find((j) => j.status === "failed") : undefined;
+  if (failed) void loadLog(failed, p);
+  else render();
+}
+
+/** Follows the main process's latest snapshot into whatever the panel has open. */
+function sync(fresh: boolean): void {
+  const s = state;
+  if (!s) return;
+  const byKey = new Map(s.pipelines.map((p) => [pipelineKey(p), p]));
+  if (ui.pipeline) {
+    const live = byKey.get(pipelineKey(ui.pipeline));
+    if (live) {
+      const changed = live.status !== ui.pipeline.status;
+      ui.pipeline = live;
+      if (!ui.jobs.length && live.jobs.length) ui.jobs = live.jobs;
+      if (fresh && ui.screen === "pipeline" && !ui.loadingJobs && (changed || isRunning(live))) void loadJobs(live, true);
     }
+  }
+  if (ui.group.length) ui.group = ui.group.map((p) => byKey.get(pipelineKey(p)) ?? p);
+  if (ui.mr && !ui.mrLoading && !ui.confirming) {
+    const current = ui.mr;
+    const live = s.mrs.find((m) => mrKey(m) === mrKey(current));
+    ui.mrMissing = !live;
+    if (live) ui.mr = { ...live, pipelineStatus: live.pipelineStatus ?? current.pipelineStatus };
+  }
+}
+
+/* ---------- events ---------- */
+
+async function act(name: string, el: HTMLElement): Promise<void> {
+  const key = el.dataset.key ?? "";
+  switch (name) {
+    case "back":
+      returnToOverview();
+      break;
+    case "refresh":
+      void call(tracer.refresh());
+      return;
+    case "notifications":
+      returnToOverview();
+      ui.screen = "notifications";
+      break;
+    case "settings":
+      returnToOverview();
+      ui.screen = "settings";
+      break;
+    case "history":
+      returnToOverview();
+      ui.screen = "history";
+      break;
+    case "toggle-other":
+      ui.showOther = !ui.showOther;
+      break;
+    case "pipeline": {
+      const p = findPipeline(key);
+      if (p) selectPipeline(p);
+      return;
+    }
+    case "group": {
+      const list = (el.dataset.keys ?? "")
+        .split(",")
+        .map(findPipeline)
+        .filter((p): p is Pipeline => p != null);
+      if (list.length) void selectGroup(list);
+      return;
+    }
+    case "history-toggle":
+      void toggleHistory(key);
+      return;
+    case "log":
+      openLog(key, Number(el.dataset.job));
+      return;
+    case "all-jobs":
+      logToken++;
+      ui.logJob = null;
+      ui.loadError = null;
+      ui.loadingLog = false;
+      break;
+    case "log-tab":
+      ui.logTab = el.dataset.value === "summary" ? "summary" : "logs";
+      break;
+    case "filter":
+      ui.eventFilter = (el.dataset.value as EventFilter) ?? "All";
+      break;
+    case "event":
+      activateEvent(el.dataset.id ?? "");
+      return;
+    case "mr": {
+      const mr = state?.mrs.find((m) => mrKey(m) === key);
+      if (mr) void showMR(mr);
+      return;
+    }
+    case "merge-ask":
+      ui.confirming = "merge";
+      break;
+    case "close-ask":
+      ui.confirming = "close";
+      break;
+    case "confirm-cancel":
+      ui.confirming = null;
+      break;
+    case "confirm-merge":
+      void finishConfirm("merge");
+      return;
+    case "confirm-close":
+      void finishConfirm("close");
+      return;
+    case "open":
+      if (el.dataset.url) void call(tracer.openExternal(el.dataset.url));
+      return;
+    case "copy-log":
+      void call(tracer.copy(ui.logText));
+      return;
+    case "notification-settings":
+      void call(tracer.openNotificationSettings());
+      return;
+    case "notification-test":
+      void call(tracer.testNotification());
+      return;
+    case "quit":
+      void call(tracer.quit());
+      return;
+    default:
+      return;
   }
   render();
 }
 
 document.addEventListener("click", (e) => {
-  const el = (e.target as Element | null)?.closest<HTMLElement>("[data-act]");
-  if (!el || (el as HTMLButtonElement).disabled) return;
-  if (el.closest("#overlay") == null && ui.confirming) return;
-  actions[Number(el.dataset.act)]?.();
+  const target = e.target as HTMLElement;
+  if (target === overlay) {
+    ui.confirming = null;
+    render();
+    return;
+  }
+  const el = target.closest<HTMLElement>("[data-act]");
+  if (el) void act(el.dataset.act!, el);
 });
 
-document.addEventListener("change", (e) => {
-  const el = e.target as HTMLInputElement | HTMLSelectElement | null;
-  if (!el?.dataset.chg) return;
-  changes[Number(el.dataset.chg)]?.(el.value, (el as HTMLInputElement).checked);
+document.addEventListener("change", async (e) => {
+  const el = e.target as HTMLInputElement | HTMLSelectElement;
+  const key = el.dataset.pref as keyof Prefs | undefined;
+  if (!key) return;
+  const value = el instanceof HTMLInputElement && el.type === "checkbox" ? el.checked : Number(el.value);
+  const prefs = await call(tracer.setPrefs({ [key]: value } as Partial<Prefs>));
+  if (prefs && state) state = { ...state, prefs };
+  render();
 });
 
 document.addEventListener("input", (e) => {
-  const el = e.target as HTMLInputElement | null;
-  if (el?.id !== "log-search") return;
+  const el = e.target as HTMLInputElement;
+  if (el.id !== "log-search") return;
   ui.search = el.value;
-  const pre = document.getElementById("log-pre");
-  if (pre) pre.innerHTML = formattedLog();
+  const lines = visibleLines();
+  const pre = document.getElementById("log-text");
   const count = document.getElementById("log-count");
-  if (count) count.textContent = logCount();
-});
-
-$("overlay").addEventListener("click", (e) => {
-  if (e.target === e.currentTarget) {
-    ui.confirming = null;
-    render();
-  }
+  if (pre) pre.innerHTML = logHtml(lines);
+  if (count) count.textContent = logCount(lines.length);
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  if (ui.confirming) ui.confirming = null;
-  else if (ui.view !== "overview") returnToOverview();
-  else {
-    void window.tracer.hide();
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "q") {
+    e.preventDefault();
+    void call(tracer.quit());
     return;
+  }
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  if (ui.confirming) {
+    ui.confirming = null;
+    render();
+  } else if (ui.screen !== "overview") {
+    returnToOverview();
+    render();
+  } else {
+    void call(tracer.hide());
+  }
+});
+
+new ResizeObserver(() => requestFit()).observe(content);
+
+tracer.onState((next) => {
+  const fresh = next.updated !== state?.updated;
+  state = next;
+  sync(fresh);
+  render();
+});
+
+tracer.onHidden(() => {
+  ui.confirming = null;
+  if (!state?.prefs.rememberPlace) {
+    returnToOverview();
+    ui.showOther = false;
   }
   render();
 });
 
-window.tracer.onState(applyState);
-window.tracer.onHidden(() => {
-  ui.confirming = null;
-  if (!data.prefs.rememberPlace) returnToOverview();
+tracer.onShown(() => render());
+
+void call(tracer.getState()).then((s) => {
+  if (s) {
+    state = s;
+    sync(false);
+  }
   render();
 });
-window.tracer.onShown(() => fit());
-// Relative times ("3m ago") stay current while the panel is open.
-setInterval(() => {
-  if (document.visibilityState === "visible" && ["overview", "history", "notifications"].includes(ui.view)) render();
-}, 30_000);
-
-void window.tracer.getState().then(applyState);
