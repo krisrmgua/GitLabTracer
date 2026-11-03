@@ -59,8 +59,8 @@ Quit and rerun `./install.sh` after you change the source if you want the menu-b
 
 On a timer, Tracer asks GitLab.com, through `glab`, for:
 
-- open merge requests you created (up to 30)
-- projects you belong to that were active in the last few days (up to 60)
+- open merge requests you created (up to 30), skipping archived projects
+- projects you belong to that were active in the last few days (up to 60; archived excluded)
 - your recent pipelines on those projects (10 per project, inside the hour window you set)
 - jobs for a pipeline when you open it (up to 100)
 
@@ -79,6 +79,8 @@ The back control is the chevron and the title together. A section header toggles
 ### Merge
 
 **Merge** is off unless you turn the preference on. It asks you to confirm, loads the merge request again, and continues only when GitLab still says it is open, not a draft, and mergeable, and the source SHA still matches the one you were looking at. The request is `PUT` through `glab` with that SHA. One merge is sent at a time. A notification never merges for you.
+
+**Close MR** sits beside Merge (about one third of the row). It always asks you to confirm, then closes the request through `glab`. It does not delete the source branch.
 
 ### Notifications
 
