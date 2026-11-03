@@ -37,10 +37,13 @@ enum PipelineProgressRing {
     }
 
     static func image(status: PipelineStatus, progress: Double) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        // Drawn into a padded slot in the capsule (~20 pt). Leave a little
+        // inset inside this canvas so the stroke does not clip.
+        let size = NSSize(width: 20, height: 20)
         let image = NSImage(size: size, flipped: false) { rect in
             let center = NSPoint(x: rect.midX, y: rect.midY)
-            let radius: CGFloat = 6.5
+            let lineWidth: CGFloat = 3.0
+            let radius = min(rect.width, rect.height) / 2 - lineWidth / 2 - 0.5
             let ringRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
 
             let color: NSColor
@@ -54,7 +57,7 @@ enum PipelineProgressRing {
 
             // Background track in the status color, dimmed.
             let track = NSBezierPath(ovalIn: ringRect)
-            track.lineWidth = 2.6
+            track.lineWidth = lineWidth
             // Track must stay visible on the menu bar, so it is stronger for the grey (no pipeline) state.
             color.withAlphaComponent(status == .pending ? 0.7 : 0.3).setStroke()
             track.stroke()
@@ -63,7 +66,7 @@ enum PipelineProgressRing {
             let fraction = min(max(progress, 0), 1)
             if fraction > 0 {
                 let arc = NSBezierPath()
-                arc.lineWidth = 2.6
+                arc.lineWidth = lineWidth
                 arc.lineCapStyle = .round
                 arc.appendArc(withCenter: center, radius: radius, startAngle: 90,
                               endAngle: 90 - 360 * fraction, clockwise: true)
