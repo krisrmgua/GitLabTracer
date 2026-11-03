@@ -103,10 +103,30 @@ struct Pipeline {
     let updated: Date?
     var sha: String = ""
     var jobs: [Job] = []
+    /// Source branch of a merge-request pipeline, when GitLab reported it.
+    var sourceBranch: String = ""
 
     var isRunning: Bool { ["running", "pending", "created", "preparing", "waiting_for_resource", "scheduled"].contains(status) }
     var isFailed: Bool { status == "failed" }
     var isSuccess: Bool { status == "success" || status == "passed" }
+
+    /// `refs/merge-requests/15/head` → 15. Branch and main pipelines are nil.
+    var mergeRequestIID: Int? {
+        let prefix = "refs/merge-requests/"
+        guard ref.hasPrefix(prefix) else { return nil }
+        let rest = ref.dropFirst(prefix.count)
+        let digits = rest.prefix(while: \.isNumber)
+        guard !digits.isEmpty, rest.dropFirst(digits.count) == "/head" else { return nil }
+        return Int(digits)
+    }
+}
+
+/// One card for pipelines that are the same change: the branch run and the
+/// merge-request run. `main` stays its own card.
+struct PipelineGroup: Identifiable {
+    let pipelines: [Pipeline]
+    var id: String { pipelines.map { "\($0.projectID):\($0.id)" }.sorted().joined(separator: "|") }
+    var primary: Pipeline { pipelines.first(where: { $0.mergeRequestIID != nil }) ?? pipelines[0] }
 }
 
 extension GitLabModel {
@@ -136,6 +156,44 @@ extension GitLabModel {
             }
             return !fixed
         }
+    }
+
+    /// Collapse a merge-request pipeline and the branch pipeline for that same
+    /// change into one group. A `main` or `master` pipeline stays separate
+    /// unless it is actually the merge request's source branch.
+    static func groupSameChange(_ list: [Pipeline]) -> [PipelineGroup] {
+        var remaining = list
+        var groups: [PipelineGroup] = []
+        while !remaining.isEmpty {
+            let pipeline = remaining.removeFirst()
+            if let match = remaining.firstIndex(where: { other in
+                sameChange(pipeline, other)
+            }) {
+                let other = remaining.remove(at: match)
+                let mr = pipeline.mergeRequestIID != nil ? pipeline : other
+                let branch = pipeline.mergeRequestIID != nil ? other : pipeline
+                groups.append(PipelineGroup(pipelines: [mr, branch]))
+            } else {
+                groups.append(PipelineGroup(pipelines: [pipeline]))
+            }
+        }
+        return groups
+    }
+
+    static func groupTitle(_ pipelines: [Pipeline]) -> String {
+        if let branch = pipelines.first(where: { $0.mergeRequestIID == nil }) { return branch.ref }
+        if let iid = pipelines.first?.mergeRequestIID { return "MR !\(iid)" }
+        return pipelines.first?.ref ?? ""
+    }
+
+    static func sameChange(_ lhs: Pipeline, _ rhs: Pipeline) -> Bool {
+        guard lhs.projectID == rhs.projectID, lhs.id != rhs.id else { return false }
+        let mr = lhs.mergeRequestIID != nil ? lhs : rhs
+        let branch = lhs.mergeRequestIID != nil ? rhs : lhs
+        guard mr.mergeRequestIID != nil, branch.mergeRequestIID == nil else { return false }
+        if !mr.sourceBranch.isEmpty { return branch.ref == mr.sourceBranch }
+        if branch.ref == "main" || branch.ref == "master" { return false }
+        return !mr.sha.isEmpty && mr.sha == branch.sha
     }
 }
 
@@ -170,7 +228,30 @@ extension GitLabModel {
             }
             lock.lock(); out += pipes; lock.unlock()
         }
+        out = annotateSourceBranches(out)
         return out.sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+    }
+
+    /// Running merge-request pipelines need the source branch so they can sit
+    /// with the branch pipeline even when GitLab gave them different commits.
+    private static func annotateSourceBranches(_ pipelines: [Pipeline]) -> [Pipeline] {
+        var branches: [String: String] = [:]
+        for pipeline in pipelines where pipeline.isRunning {
+            guard let iid = pipeline.mergeRequestIID else { continue }
+            let key = "\(pipeline.projectID):\(iid)"
+            if branches[key] != nil { continue }
+            let detail = Shell.glabJSON("projects/\(pipeline.projectID)/merge_requests/\(iid)") as? [String: Any]
+            if let branch = detail?["source_branch"] as? String, !branch.isEmpty {
+                branches[key] = branch
+            }
+        }
+        return pipelines.map { pipeline in
+            guard let iid = pipeline.mergeRequestIID,
+                  let branch = branches["\(pipeline.projectID):\(iid)"] else { return pipeline }
+            var copy = pipeline
+            copy.sourceBranch = branch
+            return copy
+        }
     }
 
     static func fetchJobs(projectID: Int, pipelineID: Int) -> [Job] {
