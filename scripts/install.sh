@@ -41,6 +41,7 @@ pkill -f "$APP_NAME/Contents/MacOS/Pipeline Tracer" 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 rm -rf "$APP_DEST"
 ditto "$APP_SRC" "$APP_DEST"
+xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
 codesign --force --deep --sign - "$APP_DEST" >/dev/null 2>&1 || true
 
 # Same label as the Swift installer, so this replaces its login item instead of adding a second one.

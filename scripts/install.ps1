@@ -10,9 +10,15 @@ $NodeMajor = [int]((node -p "process.versions.node.split('.')[0]").Trim())
 if ($NodeMajor -lt 20) {
   throw "Node.js 20 or newer is required (found $(node -v))."
 }
-if (-not (Get-Command glab -ErrorAction SilentlyContinue) -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
-  Write-Warning "Neither glab nor gh is on PATH. Install one (winget install GLab.GLab or winget install GitHub.cli) and sign in, or the panel stays empty."
+if (-not (Get-Command glab -ErrorAction SilentlyContinue)) {
+  Write-Warning "glab is not on PATH, so GitLab stays empty. Install it with: winget install --id glab.glab"
 }
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+  Write-Warning "gh is not on PATH, so GitHub stays empty. Install it with: winget install --id GitHub.cli"
+}
+
+# Stop a running copy so the build and the installer can replace its files.
+Get-Process -Name "Pipeline Tracer" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 npm install
 if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
@@ -26,8 +32,6 @@ $Setup = Get-ChildItem -Path (Join-Path $Root "release") -Filter "Pipeline Trace
 if (-not $Setup) {
   throw "Installer not found under release\"
 }
-
-Get-Process -Name "Pipeline Tracer" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 Write-Host "Launching $($Setup.FullName)"
 Start-Process -FilePath $Setup.FullName -Wait
