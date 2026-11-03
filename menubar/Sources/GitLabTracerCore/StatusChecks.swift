@@ -8,11 +8,12 @@ public final class StatusChecks {
         checks.testManualWaitAndRunningClassification()
         checks.testDraftCannotBeReady()
         checks.testLaterPipelineForSameCommitClearsFailure()
+        checks.testBranchAndMergeRequestPipelinesGroup()
         precondition(GitLabModel.parseDate("2026-10-31T22:10:12.123Z") != nil)
         precondition(GitLabModel.parseDate("2026-10-31T22:10:12Z") != nil)
         checks.testNotificationContent()
         checks.testPanelReturnsToOverviewByDefault()
-        print("9 status/date/notification checks passed")
+        print("10 status/date/notification checks passed")
     }
     func testNotificationContent() {
         let body = "Fix e2e: " + String(repeating: "calendar ", count: 30)
@@ -77,5 +78,22 @@ public final class StatusChecks {
         precondition(GitLabModel.unresolvedFailures([failed, main]).count == 1)
         let olderPass = Pipeline(projectID: 1, id: 9, project: "example/app", ref: "refs/merge-requests/17/head", status: "success", url: "", updated: Date(timeIntervalSince1970: 1), sha: "aaaaaaaaaa")
         precondition(GitLabModel.unresolvedFailures([failed, olderPass]).count == 1)
+    }
+    func testBranchAndMergeRequestPipelinesGroup() {
+        var mr = Pipeline(projectID: 1, id: 20, project: "example/app", ref: "refs/merge-requests/15/head", status: "running", url: "", updated: Date(timeIntervalSince1970: 20), sha: "different-sha")
+        mr.sourceBranch = "feature/header"
+        let branch = Pipeline(projectID: 1, id: 19, project: "example/app", ref: "feature/header", status: "running", url: "", updated: Date(timeIntervalSince1970: 19), sha: "branch-sha")
+        let main = Pipeline(projectID: 1, id: 21, project: "example/app", ref: "main", status: "running", url: "", updated: Date(timeIntervalSince1970: 21), sha: "main-sha")
+        let groups = GitLabModel.groupSameChange([main, mr, branch])
+        precondition(groups.count == 2)
+        precondition(groups.contains { $0.pipelines.map(\.id).sorted() == [19, 20] })
+        precondition(groups.contains { $0.pipelines.map(\.id) == [21] })
+        precondition(GitLabModel.groupTitle([mr, branch]) == "feature/header")
+        precondition(Pipeline(projectID: 1, id: 1, project: "example/app", ref: "refs/merge-requests/15/head", status: "running", url: "", updated: nil).mergeRequestIID == 15)
+        precondition(main.mergeRequestIID == nil)
+        let sameSha = Pipeline(projectID: 1, id: 30, project: "example/app", ref: "refs/merge-requests/8/head", status: "running", url: "", updated: nil, sha: "abc")
+        let twin = Pipeline(projectID: 1, id: 31, project: "example/app", ref: "feature/other", status: "running", url: "", updated: nil, sha: "abc")
+        precondition(GitLabModel.groupSameChange([sameSha, twin, main]).count == 2)
+        precondition(!GitLabModel.sameChange(sameSha, main))
     }
 }

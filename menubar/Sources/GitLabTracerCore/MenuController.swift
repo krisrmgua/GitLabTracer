@@ -282,8 +282,8 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     /// Menu bar text: merge requests, running and failed pipelines.
     func updateTitle() {
-        let running = pipelines.filter { $0.isRunning }.count
-        let failed = GitLabModel.unresolvedFailures(pipelines).count
+        let running = GitLabModel.groupSameChange(pipelines.filter { $0.isRunning }).count
+        let failed = GitLabModel.groupSameChange(GitLabModel.unresolvedFailures(pipelines)).count
         let (status, progress) = PipelineProgressRing.state(for: cardPipeline)
         let button = statusItem.button
         button?.title = ""
@@ -310,9 +310,9 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     private func rebuild() {
         menu.removeAllItems()
-        let running = pipelines.filter { $0.isRunning }.count
+        let running = GitLabModel.groupSameChange(pipelines.filter { $0.isRunning }).count
         let failedNow = GitLabModel.unresolvedFailures(pipelines)
-        let failed = failedNow.count
+        let failed = GitLabModel.groupSameChange(failedNow).count
         let card = NSMenuItem()
         card.view = PipelineCard.view(for: cardPipeline,
                                       summary: "\(mergeRequests.count) MRs · \(running) running · \(failed) failed",

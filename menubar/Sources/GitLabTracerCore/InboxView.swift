@@ -68,6 +68,8 @@ private enum Deck {
 
 final class InboxViewState: ObservableObject {
     @Published var selectedPipeline: Pipeline? = nil
+    @Published var selectedGroup: [Pipeline] = []
+    @Published var groupJobs: [Int: [Job]] = [:]
     @Published var selectedMR: MergeRequest? = nil
     var resize: (NSSize) -> Void = { _ in }
     @Published var maximumHeight: CGFloat = 700
@@ -104,6 +106,8 @@ final class InboxViewState: ObservableObject {
         requestID = UUID()
         logRequestID = UUID()
         selectedPipeline = nil
+        selectedGroup = []
+        groupJobs = [:]
         selectedMR = nil
         logJob = nil
         settings = false
@@ -138,6 +142,7 @@ struct InboxView: View {
 
     private var screenTitle: String {
         if state.logJob != nil { return "Job logs" }
+        if state.selectedGroup.count > 1 { return GitLabModel.groupTitle(state.selectedGroup) }
         if state.selectedMR != nil { return "Merge request" }
         if state.selectedPipeline != nil { return "Pipeline" }
         if state.settings { return "Preferences" }
@@ -149,7 +154,9 @@ struct InboxView: View {
         state.selectedPipeline != nil || state.selectedMR != nil || state.settings || state.notifications || state.history
     }
     private var failures: [Pipeline] { GitLabModel.unresolvedFailures(model.pipelines) }
+    private var failureGroups: [PipelineGroup] { GitLabModel.groupSameChange(failures) }
     private var active: [Pipeline] { model.pipelines.filter { $0.isRunning || $0.status == "manual" } }
+    private var activeGroups: [PipelineGroup] { GitLabModel.groupSameChange(active) }
     private var finished: [Pipeline] { model.pipelines.filter { $0.status == "success" || $0.status == "passed" } }
     private var otherCompletions: [Pipeline] { model.pipelines.filter { ["canceled", "cancelled", "skipped"].contains($0.status) } }
     private var mergedEvents: [ActivityEvent] { model.events.filter { $0.status == "merged" } }
@@ -182,7 +189,9 @@ struct InboxView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if state.settings { preferences }
                     else if state.notifications { notificationsView }
-                    else if let p = state.selectedPipeline {
+                    else if state.selectedGroup.count > 1 {
+                        groupedPipelineDetail(state.selectedGroup)
+                    } else if let p = state.selectedPipeline {
                         pipelineDetail(p)
                     } else if state.history { successView }
                     else { overview }
@@ -195,7 +204,7 @@ struct InboxView: View {
             HStack {
                 Text(model.updated.map { (model.preview ? "Preview · " : "Updated ") + "" + $0.formatted(date: .omitted, time: .shortened) } ?? "Connecting to GitLab…")
                 Spacer()
-                Text("\(model.mrs.count) MRs · \(active.count) active")
+                Text("\(model.mrs.count) MRs · \(activeGroups.count) active")
             }.font(.system(size: 10)).foregroundColor(.secondary).padding(8)
                 .background(GeometryReader { geometry in Color.clear.preference(key: InboxChromeHeight.self, value: geometry.size.height) })
         }
@@ -230,21 +239,21 @@ struct InboxView: View {
             if let result = model.result, !model.preview {
                 Text(result).font(.system(size: 10)).foregroundColor(.secondary)
             }
-            if !failures.isEmpty {
-                heading("Attention needed", count: failures.count, color: .red)
+            if !failureGroups.isEmpty {
+                heading("Attention needed", count: failureGroups.count, color: .red)
                 panel {
-                    ForEach(Array(failures.enumerated()), id: \.element.id) { index, p in
+                    ForEach(Array(failureGroups.enumerated()), id: \.element.id) { index, group in
                         if index > 0 { rowDivider }
-                        pipelineRow(p)
+                        pipelineGroupRow(group)
                     }
                 }
             }
-            heading("In progress", count: active.count, color: Deck.cyan)
+            heading("In progress", count: activeGroups.count, color: Deck.cyan)
             panel {
-                if active.isEmpty { compactEmpty(model.refreshing && model.updated == nil ? "Loading pipelines…" : "No active pipelines") }
-                ForEach(Array(active.enumerated()), id: \.element.id) { index, p in
+                if activeGroups.isEmpty { compactEmpty(model.refreshing && model.updated == nil ? "Loading pipelines…" : "No active pipelines") }
+                ForEach(Array(activeGroups.enumerated()), id: \.element.id) { index, group in
                     if index > 0 { rowDivider }
-                    pipelineRow(p)
+                    pipelineGroupRow(group)
                 }
             }
             heading("Merge requests", count: model.mrs.count, color: Deck.cyan)
@@ -373,6 +382,69 @@ struct InboxView: View {
                 Image(systemName: "chevron.right").font(.system(size: 10)).foregroundColor(.secondary)
             }.padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
         }.buttonStyle(InboxRowStyle()).help("!\(String(mr.iid)) \(mr.title) — \(mrState(mr))")
+    }
+
+    private func pipelineGroupRow(_ group: PipelineGroup) -> some View {
+        if group.pipelines.count == 1 { return AnyView(pipelineRow(group.pipelines[0])) }
+        let branch = group.pipelines.first { $0.mergeRequestIID == nil }
+        let mr = group.pipelines.first { $0.mergeRequestIID != nil }
+        let title = GitLabModel.groupTitle(group.pipelines)
+        let when = group.pipelines.compactMap(\.updated).max()
+        return AnyView(Button { selectGroup(group.pipelines) } label: {
+            HStack(spacing: 10) {
+                progressRing(group.primary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Text("\(group.primary.project) · MR !\(mr?.mergeRequestIID ?? 0)").font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                    HStack(spacing: 8) {
+                        if let mr { Text("MR !\(mr.mergeRequestIID ?? 0) · \(Deck.title(mr.status))") }
+                        if let branch { Text("branch · \(Deck.title(branch.status))") }
+                    }.font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Text(relative(when)).font(.system(size: 10)).foregroundColor(.secondary).fixedSize()
+                Image(systemName: "chevron.right").font(.system(size: 10)).foregroundColor(.secondary)
+            }.padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
+        }.buttonStyle(InboxRowStyle()))
+    }
+
+    private func groupedPipelineDetail(_ pipelines: [Pipeline]) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(GitLabModel.groupTitle(pipelines)).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                Text("\(pipelines[0].project) · one change, two GitLab pipelines").font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            if let error = state.loadError { Label(error, systemImage: "exclamationmark.triangle").foregroundColor(.orange).font(.system(size: 10)) }
+            ForEach(pipelines, id: \.id) { pipeline in
+                let jobs = state.groupJobs[pipeline.id] ?? pipeline.jobs
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(pipeline.mergeRequestIID == nil ? "Branch" : "MR !\(pipeline.mergeRequestIID ?? 0)")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("#\(pipeline.id)").font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
+                        Spacer()
+                        badge(pipeline.status, pipeline.status)
+                        Button { open(pipeline.url) } label: { Image(systemName: "arrow.up.right.square").foregroundColor(Deck.cyan) }.buttonStyle(.plain)
+                    }
+                    Text(pipeline.mergeRequestIID == nil ? pipeline.ref : "refs/merge-requests/\(pipeline.mergeRequestIID ?? 0)/head")
+                        .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                    if state.loadingJobs && jobs.isEmpty { ProgressView("Loading jobs…").controlSize(.small) }
+                    if !jobs.isEmpty {
+                        panel {
+                            ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
+                                if index > 0 { rowDivider }
+                                HStack(spacing: 8) {
+                                    Image(systemName: Deck.icon(job.status)).foregroundColor(Deck.color(job.status)).frame(width: 15)
+                                    Text(job.name).font(.system(size: 11)).lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    Text(job.duration.map { duration($0) } ?? Deck.title(job.status)).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                                    Button("View logs") { loadLog(job, pipeline: pipeline) }.buttonStyle(DeckInlineStyle())
+                                }.padding(.horizontal, 10).padding(.vertical, 8)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func pipelineRow(_ p: Pipeline, expandHistory: Bool = false) -> some View {
@@ -531,14 +603,6 @@ struct InboxView: View {
                                 Button("View logs") { loadLog(job, pipeline: p) }.buttonStyle(DeckInlineStyle())
                             }.padding(.horizontal, 10).padding(.vertical, 8)
                         }
-                    }
-                    let others = active.filter { $0.id != p.id || $0.projectID != p.projectID }
-                    if !others.isEmpty {
-                        Text("Also running").font(.system(size: 10)).foregroundColor(.secondary)
-                        panel { ForEach(Array(others.enumerated()), id: \.element.id) { index, other in
-                            if index > 0 { rowDivider }
-                            pipelineRow(other)
-                        } }
                     }
                 } else if !state.loadingJobs && state.loadError == nil { compactEmpty("No jobs available · Open GitLab for details") }
             }
@@ -781,6 +845,31 @@ struct InboxView: View {
     private func completed(_ list: [Job]) -> Int { list.filter { Notifier.isDone($0.status) }.count }
     private func open(_ url: String) { if let u = URL(string: url) { NSWorkspace.shared.open(u) } }
     private func resetDetail() { state.returnToOverview() }
+    private func selectGroup(_ pipelines: [Pipeline]) {
+        resetDetail()
+        state.selectedGroup = pipelines
+        state.selectedPipeline = pipelines[0]
+        for pipeline in pipelines { state.groupJobs[pipeline.id] = pipeline.jobs }
+        if model.preview { return }
+        state.loadingJobs = true
+        let token = UUID(); state.requestID = token
+        DispatchQueue.global(qos: .utility).async {
+            var loaded: [Int: [Job]] = [:]
+            for pipeline in pipelines {
+                if case .success(let jobs) = GitLabModel.loadJobs(projectID: pipeline.projectID, pipelineID: pipeline.id) {
+                    loaded[pipeline.id] = jobs
+                }
+            }
+            DispatchQueue.main.async {
+                guard state.requestID == token else { return }
+                state.loadingJobs = false
+                for (id, jobs) in loaded { state.groupJobs[id] = jobs }
+                if loaded.count != pipelines.count {
+                    state.loadError = "Couldn’t load every pipeline. Open GitLab for the missing one."
+                }
+            }
+        }
+    }
     private func select(_ p: Pipeline) {
         resetDetail(); state.selectedPipeline = p; state.jobs = p.jobs; if model.preview { return }; state.loadingJobs = true
         let token = UUID(); state.requestID = token
