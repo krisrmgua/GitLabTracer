@@ -132,9 +132,11 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard !gitlabRefreshing else { return }
         gitlabRefreshing = true
         inbox.refreshing = true
-        // Pipelines that were still going last time: fetch their jobs once more, so a job
-        // that finished just before the pipeline did still gets a notification.
+        // Pipelines that were still going last time: reload jobs only when they finish,
+        // so a failure notification can name the bad job without fetching every active pipe.
         let wasActive = Set(lastPipelineStatus.filter { Notifier.isActive($0.value) }.keys)
+        let knownPipes = seenPipelineIDs
+        let previousPipes = Dictionary(uniqueKeysWithValues: pipelines.map { ("\($0.projectID):\($0.id)", $0) })
         DispatchQueue.global(qos: .utility).async {
             guard GitLabModel.currentUser() != nil else {
                 DispatchQueue.main.async {
@@ -154,19 +156,29 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
                 }
                 return
             }
-            // Jobs for pipelines that matter (running or failed), so the menu can show stages.
-            for i in pipes.indices where pipes[i].isRunning || pipes[i].isFailed || wasActive.contains("\(pipes[i].projectID):\(pipes[i].id)") {
-                pipes[i].jobs = GitLabModel.fetchJobs(projectID: pipes[i].projectID, pipelineID: pipes[i].id)
-            }
-            // The status card shows the running pipeline, else the newest one (pipes are newest first).
-            let cardIndex = pipes.firstIndex(where: { $0.isRunning }) ?? (pipes.isEmpty ? nil : 0)
-            var card: Pipeline? = nil
-            if let i = cardIndex {
-                if pipes[i].jobs.isEmpty {
-                    pipes[i].jobs = GitLabModel.fetchJobs(projectID: pipes[i].projectID, pipelineID: pipes[i].id)
+            pipes = GitLabModel.annotateSourceBranches(pipes, openMRs: mrs)
+            // Reuse jobs while status+sha are unchanged; only fetch the status-card pipe
+            // and pipes that just left the active set (for failure detail).
+            for i in pipes.indices {
+                let key = "\(pipes[i].projectID):\(pipes[i].id)"
+                if let old = previousPipes[key], old.status == pipes[i].status, old.sha == pipes[i].sha, !old.jobs.isEmpty {
+                    pipes[i].jobs = old.jobs
+                } else if let cached = GitLabModel.cachedJobs(projectID: pipes[i].projectID, pipelineID: pipes[i].id, status: pipes[i].status, sha: pipes[i].sha) {
+                    pipes[i].jobs = cached
                 }
-                card = pipes[i]
             }
+            let cardIndex = pipes.firstIndex(where: { $0.isRunning }) ?? (pipes.isEmpty ? nil : 0)
+            if let i = cardIndex, pipes[i].jobs.isEmpty {
+                if case .success(let jobs) = GitLabModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
+            }
+            for i in pipes.indices where pipes[i].jobs.isEmpty {
+                let key = "\(pipes[i].projectID):\(pipes[i].id)"
+                let leftActive = wasActive.contains(key) && !pipes[i].isRunning
+                if leftActive || (pipes[i].isFailed && !knownPipes.contains(key)) {
+                    if case .success(let jobs) = GitLabModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
+                }
+            }
+            let card: Pipeline? = cardIndex.map { pipes[$0] }
             DispatchQueue.main.async {
                 self.notifyMergeChanges(mrs)
                 self.notifyChanges(pipes)

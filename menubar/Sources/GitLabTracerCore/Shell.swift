@@ -35,4 +35,13 @@ enum Shell {
         guard r.status == 0, !r.out.isEmpty, let d = r.out.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: d)
     }
+
+    /// `glab api graphql -f query=…` parsed as JSON, or nil on failure.
+    static func glabGraphQL(_ query: String) -> [String: Any]? {
+        let r = run(["glab", "api", "graphql", "--hostname", "gitlab.com", "-f", "query=\(query)"])
+        guard r.status == 0, !r.out.isEmpty, let d = r.out.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        if root["errors"] != nil { return nil }
+        return root["data"] as? [String: Any]
+    }
 }

@@ -20,28 +20,66 @@ struct MergeRequest: Equatable {
 }
 
 enum GitLabModel {
+    private static let cacheLock = NSLock()
+    private static var cachedUsername: String?
+    private static var cachedUsernameAt: Date?
+    /// Jobs keyed by `projectID:pipelineID`, kept while status+sha stay the same.
+    private static var jobCache: [String: (fingerprint: String, jobs: [Job])] = [:]
+    private static let usernameTTL: TimeInterval = 3600
+
+    /// One GraphQL query: open MRs you authored, with archived project flag inlined.
     static func fetchOpenMergeRequests(onFailure: () -> Void = {}) -> [MergeRequest] {
-        guard let list = Shell.glabJSON("merge_requests?scope=created_by_me&state=opened&per_page=30&order_by=updated_at&sort=desc") as? [[String: Any]] else { onFailure(); return [] }
+        let query = """
+        query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt project{id fullPath archived} headPipeline{status}}}}}
+        """
+        guard let data = Shell.glabGraphQL(query),
+              let user = data["currentUser"] as? [String: Any],
+              let connection = user["authoredMergeRequests"] as? [String: Any],
+              let nodes = connection["nodes"] as? [[String: Any]] else {
+            // REST fallback if GraphQL is unavailable.
+            return fetchOpenMergeRequestsREST(onFailure: onFailure)
+        }
+        // parseGraphQL drops archived projects.
+        return nodes.compactMap(parseGraphQL)
+    }
+
+    /// REST path kept as fallback; still avoids N archived lookups via a short-lived cache.
+    private static func fetchOpenMergeRequestsREST(onFailure: () -> Void) -> [MergeRequest] {
+        guard let list = Shell.glabJSON("merge_requests?scope=created_by_me&state=opened&per_page=30&order_by=updated_at&sort=desc") as? [[String: Any]] else {
+            onFailure(); return []
+        }
         let mrs = list.compactMap(parse)
-        // The MR list API has no archived filter; drop MRs whose project is archived.
         let archived = archivedProjects(Set(mrs.map(\.projectID)))
         return mrs.filter { !archived.contains($0.projectID) }
     }
 
-    /// Project IDs among `ids` that GitLab reports as archived.
+    /// Project IDs among `ids` that GitLab reports as archived (cached).
     static func archivedProjects(_ ids: Set<Int>) -> Set<Int> {
         guard !ids.isEmpty else { return [] }
-        let list = Array(ids)
-        let lock = NSLock()
+        cacheLock.lock()
+        var known = archivedCache
+        cacheLock.unlock()
         var archived = Set<Int>()
-        DispatchQueue.concurrentPerform(iterations: list.count) { i in
-            let id = list[i]
-            guard let project = Shell.glabJSON("projects/\(id)?simple=true") as? [String: Any],
-                  (project["archived"] as? Bool) == true else { return }
-            lock.lock(); archived.insert(id); lock.unlock()
+        var missing: [Int] = []
+        for id in ids {
+            if let cached = known[id] {
+                if cached { archived.insert(id) }
+            } else {
+                missing.append(id)
+            }
         }
+        for id in missing {
+            let isArchived = (Shell.glabJSON("projects/\(id)?simple=true") as? [String: Any])?["archived"] as? Bool ?? false
+            known[id] = isArchived
+            if isArchived { archived.insert(id) }
+        }
+        cacheLock.lock()
+        archivedCache = known
+        cacheLock.unlock()
         return archived
     }
+
+    private static var archivedCache: [Int: Bool] = [:]
 
     static func parse(_ m: [String: Any]) -> MergeRequest? {
         guard let pid = m["project_id"] as? Int,
@@ -53,13 +91,52 @@ enum GitLabModel {
             projectID: pid, iid: iid, title: title,
             project: projectPath(fromWebURL: url), url: url,
             draft: (m["draft"] as? Bool) ?? false,
-            mergeStatus: (m["detailed_merge_status"] as? String) ?? "unknown",
-            pipelineStatus: pipe,
+            mergeStatus: normalizeMergeStatus(m["detailed_merge_status"] as? String),
+            pipelineStatus: pipe.map(normalizePipelineStatus),
             updated: parseDate(m["updated_at"] as? String),
             sourceBranch: m["source_branch"] as? String ?? "",
             targetBranch: m["target_branch"] as? String ?? "",
             sha: m["sha"] as? String ?? ""
         )
+    }
+
+    static func parseGraphQL(_ node: [String: Any]) -> MergeRequest? {
+        guard let project = node["project"] as? [String: Any],
+              (project["archived"] as? Bool) != true,
+              let pid = projectID(fromGraphQL: project["id"]),
+              let path = project["fullPath"] as? String,
+              let iidValue = node["iid"],
+              let iid = Int("\(iidValue)"),
+              let title = node["title"] as? String,
+              let url = node["webUrl"] as? String else { return nil }
+        let pipe = (node["headPipeline"] as? [String: Any])?["status"] as? String
+        return MergeRequest(
+            projectID: pid, iid: iid, title: title,
+            project: path, url: url,
+            draft: (node["draft"] as? Bool) ?? false,
+            mergeStatus: normalizeMergeStatus(node["detailedMergeStatus"] as? String),
+            pipelineStatus: pipe.map(normalizePipelineStatus),
+            updated: parseDate(node["updatedAt"] as? String),
+            sourceBranch: node["sourceBranch"] as? String ?? "",
+            targetBranch: node["targetBranch"] as? String ?? "",
+            sha: node["diffHeadSha"] as? String ?? ""
+        )
+    }
+
+    /// `gid://gitlab/Project/123` → 123
+    static func projectID(fromGraphQL value: Any?) -> Int? {
+        if let n = value as? Int { return n }
+        guard let s = value as? String else { return nil }
+        if let n = Int(s) { return n }
+        return Int(s.split(separator: "/").last.map(String.init) ?? "")
+    }
+
+    static func normalizeMergeStatus(_ raw: String?) -> String {
+        (raw ?? "unknown").replacingOccurrences(of: " ", with: "_").lowercased()
+    }
+
+    static func normalizePipelineStatus(_ raw: String) -> String {
+        raw.replacingOccurrences(of: " ", with: "_").lowercased()
     }
 
     /// "https://gitlab.com/group/proj/-/merge_requests/3" -> "group/proj"
@@ -239,40 +316,63 @@ extension GitLabModel {
         ISO8601DateFormatter().string(from: date)
     }
 
+    /// Cached for an hour so the timer does not burn a call every tick.
     static func currentUser() -> String? {
-        (Shell.glabJSON("user") as? [String: Any])?["username"] as? String
+        cacheLock.lock()
+        if let name = cachedUsername, let at = cachedUsernameAt, Date().timeIntervalSince(at) < usernameTTL {
+            cacheLock.unlock()
+            return name
+        }
+        cacheLock.unlock()
+        let name = (Shell.glabJSON("user") as? [String: Any])?["username"] as? String
+        if let name {
+            cacheLock.lock()
+            cachedUsername = name
+            cachedUsernameAt = Date()
+            cacheLock.unlock()
+        }
+        return name
     }
 
-    /// Your recent pipelines across the projects you are a member of (last `hours`).
+    /// Your recent pipelines in one (or a few) instance-level calls instead of one per project.
     static func fetchPipelines(hours: Int = 24, onFailure: @escaping () -> Void = {}) -> [Pipeline] {
-        guard let user = currentUser() else { onFailure(); return [] }
-        let projectSince = isoString(Date().addingTimeInterval(-3 * 86400))
-        guard let projects = Shell.glabJSON("projects?membership=true&archived=false&simple=true&per_page=60&order_by=last_activity_at&sort=desc&last_activity_after=\(projectSince)") as? [[String: Any]] else { onFailure(); return [] }
-        let pipeSince = isoString(Date().addingTimeInterval(-Double(hours) * 3600))
-        let lock = NSLock()
-        var out: [Pipeline] = []
-        DispatchQueue.concurrentPerform(iterations: projects.count) { i in
-            guard let pid = projects[i]["id"] as? Int,
-                  let name = projects[i]["path_with_namespace"] as? String else { return }
-            guard let list = Shell.glabJSON("projects/\(pid)/pipelines?username=\(user)&updated_after=\(pipeSince)&per_page=10") as? [[String: Any]] else { onFailure(); return }
-            let pipes: [Pipeline] = list.compactMap { d in
-                guard let id = d["id"] as? Int, let status = d["status"] as? String,
-                      let url = d["web_url"] as? String else { return nil }
-                return Pipeline(projectID: pid, id: id, project: name,
-                                ref: (d["ref"] as? String) ?? "", status: status, url: url,
-                                updated: parseDate(d["updated_at"] as? String),
-                                sha: (d["sha"] as? String) ?? "")
-            }
-            lock.lock(); out += pipes; lock.unlock()
+        guard currentUser() != nil else { onFailure(); return [] }
+        let since = Date().addingTimeInterval(-Double(hours) * 3600)
+        // Instance endpoint filters by created_at; keep a little slack then keep rows by updated_at.
+        let createdAfter = isoString(since.addingTimeInterval(-6 * 3600))
+        let path = "pipelines?per_page=100&order_by=created_at&sort=desc&created_after=\(createdAfter)"
+        guard let list = Shell.glabJSON(path) as? [[String: Any]] else { onFailure(); return [] }
+        let out: [Pipeline] = list.compactMap { d in
+            guard let pipe = parseInstancePipeline(d) else { return nil }
+            if let updated = pipe.updated, updated < since { return nil }
+            return pipe
         }
-        out = annotateSourceBranches(out)
         return out.sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
     }
 
-    /// Running merge-request pipelines need the source branch so they can sit
-    /// with the branch pipeline even when GitLab gave them different commits.
-    private static func annotateSourceBranches(_ pipelines: [Pipeline]) -> [Pipeline] {
+    static func parseInstancePipeline(_ d: [String: Any]) -> Pipeline? {
+        guard let id = d["id"] as? Int,
+              let status = d["status"] as? String,
+              let url = d["web_url"] as? String else { return nil }
+        let project = d["project"] as? [String: Any]
+        let pid = (d["project_id"] as? Int) ?? (project?["id"] as? Int)
+        guard let pid else { return nil }
+        let name = (project?["path_with_namespace"] as? String)
+            ?? projectPath(fromWebURL: url)
+        return Pipeline(
+            projectID: pid, id: id, project: name,
+            ref: (d["ref"] as? String) ?? "", status: status, url: url,
+            updated: parseDate(d["updated_at"] as? String) ?? parseDate(d["created_at"] as? String),
+            sha: (d["sha"] as? String) ?? ""
+        )
+    }
+
+    /// Prefer source branches already loaded with open MRs; only hit the API for the rest.
+    static func annotateSourceBranches(_ pipelines: [Pipeline], openMRs: [MergeRequest] = []) -> [Pipeline] {
         var branches: [String: String] = [:]
+        for mr in openMRs where !mr.sourceBranch.isEmpty {
+            branches["\(mr.projectID):\(mr.iid)"] = mr.sourceBranch
+        }
         for pipeline in pipelines where pipeline.isRunning {
             guard let iid = pipeline.mergeRequestIID else { continue }
             let key = "\(pipeline.projectID):\(iid)"
@@ -293,6 +393,34 @@ extension GitLabModel {
 
     static func fetchJobs(projectID: Int, pipelineID: Int) -> [Job] {
         (try? loadJobs(projectID: projectID, pipelineID: pipelineID).get()) ?? []
+    }
+
+    /// Reuse jobs while the pipeline status and SHA are unchanged.
+    static func cachedJobs(projectID: Int, pipelineID: Int, status: String, sha: String) -> [Job]? {
+        let key = "\(projectID):\(pipelineID)"
+        let fingerprint = "\(status)|\(sha)"
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let hit = jobCache[key], hit.fingerprint == fingerprint else { return nil }
+        return hit.jobs
+    }
+
+    static func storeJobs(_ jobs: [Job], projectID: Int, pipelineID: Int, status: String, sha: String) {
+        let key = "\(projectID):\(pipelineID)"
+        cacheLock.lock()
+        jobCache[key] = (fingerprint: "\(status)|\(sha)", jobs: jobs)
+        cacheLock.unlock()
+    }
+
+    static func jobsForPipeline(_ pipeline: Pipeline, force: Bool = false) -> Result<[Job], LoadError> {
+        if !force, let cached = cachedJobs(projectID: pipeline.projectID, pipelineID: pipeline.id, status: pipeline.status, sha: pipeline.sha) {
+            return .success(cached)
+        }
+        let result = loadJobs(projectID: pipeline.projectID, pipelineID: pipeline.id)
+        if case .success(let jobs) = result {
+            storeJobs(jobs, projectID: pipeline.projectID, pipelineID: pipeline.id, status: pipeline.status, sha: pipeline.sha)
+        }
+        return result
     }
 
     enum LoadError: Error { case unavailable }
