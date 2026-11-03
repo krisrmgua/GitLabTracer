@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { app } from "electron";
 import {
   isActiveStatus,
   isFailed,
@@ -66,6 +67,7 @@ export class Controller {
       closing: this.closing,
       prefs: this.store.prefs,
       platform: process.platform,
+      version: app.getVersion(),
       cli: { glab: toolPath("glab"), gh: toolPath("gh") },
       notificationsSupported: notifier.notificationsSupported(),
     };
