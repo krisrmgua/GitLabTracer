@@ -308,7 +308,7 @@ struct InboxView: View {
                         countLabel(finished.count + mergedEvents.count, .green)
                         Spacer()
                         Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
-                    }.padding(10)
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(InboxRowStyle())
             }
             if !otherCompletions.isEmpty {
@@ -319,7 +319,7 @@ struct InboxView: View {
                             countLabel(otherCompletions.count, .secondary)
                             Spacer()
                             Image(systemName: state.showOtherCompletions ? "chevron.up" : "chevron.down").font(.system(size: 11, weight: .semibold))
-                        }.padding(10).contentShape(Rectangle())
+                        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(InboxRowStyle())
                     if state.showOtherCompletions {
                         ForEach(Array(otherCompletions.enumerated()), id: \.element.id) { index, p in
@@ -340,7 +340,7 @@ struct InboxView: View {
                     countLabel(finished.count + mergedEvents.count, .green)
                     Spacer()
                     Image(systemName: "chevron.up").font(.system(size: 11, weight: .semibold))
-                }.padding(10).contentShape(Rectangle())
+                }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(InboxRowStyle())
             Text("\(GitLabTracerPrefs.pipelineHours)-hour pipeline window · merge events from this session").font(.system(size: 9)).foregroundColor(.secondary)
             panel {
