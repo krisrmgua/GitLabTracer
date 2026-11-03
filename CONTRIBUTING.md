@@ -13,6 +13,6 @@ swift run PipelineTracer --self-check
 4. Do not commit GitLab tokens, job logs, or private project data. Sample data in the repo uses `example/` paths.
 5. Open a pull request that says what changed and how you tested it.
 
-The app targets macOS 13 and is built with Swift Package Manager. A live check also needs `glab` signed in to `gitlab.com`.
+The app targets macOS 13 and is built with Swift Package Manager. A live GitLab check needs `glab` signed in to `gitlab.com`. A live GitHub Actions check needs `gh` signed in to `github.com`.
 
 User-facing behavior belongs in the README when install steps, GitLab setup, or preferences change.

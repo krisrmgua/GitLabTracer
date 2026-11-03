@@ -24,9 +24,9 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     /// Failures already announced, including ones found on the first refresh.
     private var notifiedFailureIDs: [String] = UserDefaults.standard.stringArray(forKey: "pipelinetracer.notifiedFailureIDs") ?? []
     private var pipelines: [Pipeline] = []
-    private var lastGitLab: Date?
-    private var gitlabTimer: Timer?
-    private var gitlabRefreshing = false
+    private var lastRefresh: Date?
+    private var refreshTimer: Timer?
+    private var refreshInFlight = false
 
     // Work runs one job at a time so git and merges never overlap.
     private let work = DispatchQueue(label: "pipelinetracer.work")
@@ -74,7 +74,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         statusItem.button?.action = #selector(toggleInbox)
         inbox.merge = { [weak self] mr in self?.confirmMerge(mr) }
         inbox.close = { [weak self] mr in self?.confirmClose(mr) }
-        inbox.refresh = { [weak self] in self?.scheduleTimers(); self?.refreshGitLab() }
+        inbox.refresh = { [weak self] in self?.scheduleTimers(); self?.refreshPipelines() }
         statusItem.button?.title = "Pipeline Tracer"
     }
 
@@ -95,12 +95,12 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         else {
             Notifier.checkPermission { [weak self] in self?.inbox.notificationsEnabled = $0 }
             viewState.maximumHeight = min(700, (button.window?.screen?.visibleFrame.height ?? 800) - 40)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); refreshGitLab() }
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); refreshPipelines() }
     }
 
     public func start() {
         Notifier.requestAuthorization { [weak self] in self?.inbox.notificationsEnabled = $0 }
-        refreshGitLab()
+        refreshPipelines()
         scheduleTimers()
         if CommandLine.arguments.contains("--review-window") {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -112,11 +112,11 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         if CommandLine.arguments.contains("--show") { DispatchQueue.main.async { self.toggleInbox() } }
     }
 
-    /// (Re)starts the GitLab refresh timer from the current setting.
+    /// (Re)starts the refresh timer from the current setting.
     private func scheduleTimers() {
-        gitlabTimer?.invalidate()
-        gitlabTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(PipelineTracerPrefs.gitlabRefreshSeconds), repeats: true) { [weak self] _ in
-            self?.refreshGitLab()
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(PipelineTracerPrefs.refreshSeconds), repeats: true) { [weak self] _ in
+            self?.refreshPipelines()
         }
     }
 
@@ -125,57 +125,101 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
         rebuild()
         updateTitle()   // the ring and the card come from the same data, so they always agree
-        if lastGitLab.map({ Date().timeIntervalSince($0) > 30 }) ?? true { refreshGitLab() }
+        if lastRefresh.map({ Date().timeIntervalSince($0) > 30 }) ?? true { refreshPipelines() }
     }
 
-    func refreshGitLab() {
-        guard !gitlabRefreshing else { return }
-        gitlabRefreshing = true
+    func refreshPipelines() {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
         inbox.refreshing = true
         // Pipelines that were still going last time: reload jobs only when they finish,
         // so a failure notification can name the bad job without fetching every active pipe.
         let wasActive = Set(lastPipelineStatus.filter { Notifier.isActive($0.value) }.keys)
         let knownPipes = seenPipelineIDs
-        let previousPipes = Dictionary(uniqueKeysWithValues: pipelines.map { ("\($0.projectID):\($0.id)", $0) })
+        let previousPipes = Dictionary(uniqueKeysWithValues: pipelines.map { ($0.key, $0) })
+        let previousGitLab = pipelines.filter { $0.host == .gitlab }
+        let previousGitHub = pipelines.filter { $0.host == .github }
+        let previousGitLabMRs = mergeRequests.filter { $0.host == .gitlab }
+        let previousGitHubMRs = mergeRequests.filter { $0.host == .github }
         DispatchQueue.global(qos: .utility).async {
-            guard GitLabModel.currentUser() != nil else {
+            let gitlabUser = PipelineModel.currentUser()
+            let githubUser = PipelineModel.githubLogin()
+            if gitlabUser == nil && githubUser == nil {
                 DispatchQueue.main.async {
-                    self.gitlabRefreshing = false
+                    self.refreshInFlight = false
                     self.inbox.refreshing = false
-                    self.inbox.error = "Can’t reach GitLab. Check your connection and glab sign-in. Showing last received activity."
+                    self.inbox.error = "Can’t reach GitLab or GitHub. Check your connection and glab or gh sign-in. Showing last received activity."
                 }
                 return
             }
             let failure = SnapshotFailure()
-            let mrs = GitLabModel.fetchOpenMergeRequests(onFailure: { failure.mark() })
-            var pipes = GitLabModel.fetchPipelines(hours: PipelineTracerPrefs.pipelineHours, onFailure: { failure.mark() })
-            if failure.failed {
+            var mrs: [MergeRequest] = []
+            var gitlabPipes: [Pipeline] = []
+            var gitlabOK = false
+            if gitlabUser != nil {
+                mrs = PipelineModel.fetchOpenMergeRequests(onFailure: { failure.mark() })
+                gitlabPipes = PipelineModel.fetchPipelines(hours: PipelineTracerPrefs.pipelineHours, onFailure: { failure.mark() })
+                gitlabOK = !failure.failed
+                if gitlabOK { gitlabPipes = PipelineModel.annotateSourceBranches(gitlabPipes, openMRs: mrs) }
+            }
+            var githubPipes: [Pipeline] = []
+            var githubOK = false
+            var githubMRs: [MergeRequest] = []
+            var pullsOK = githubUser == nil && previousGitHubMRs.isEmpty
+            if githubUser != nil {
+                switch PipelineModel.fetchGitHubPipelines(hours: PipelineTracerPrefs.pipelineHours) {
+                case .success(let list):
+                    githubPipes = list
+                    githubOK = true
+                case .failure:
+                    githubOK = false
+                }
+                switch PipelineModel.fetchOpenPullRequests() {
+                case .success(let list):
+                    githubMRs = list
+                    pullsOK = true
+                case .failure:
+                    pullsOK = false
+                }
+            }
+            let gitlabFailed = (gitlabUser != nil && !gitlabOK) || (gitlabUser == nil && (!previousGitLab.isEmpty || !previousGitLabMRs.isEmpty))
+            let githubFailed = (githubUser != nil && !githubOK) || (githubUser == nil && !previousGitHub.isEmpty)
+            if gitlabFailed && githubFailed && !pullsOK {
                 DispatchQueue.main.async {
-                    self.gitlabRefreshing = false; self.inbox.refreshing = false
-                    self.inbox.error = "GitLab refresh incomplete. Showing last received activity; try Refresh again."
+                    self.refreshInFlight = false; self.inbox.refreshing = false
+                    self.inbox.error = "Refresh incomplete. Showing last received activity; try Refresh again."
                 }
                 return
             }
-            pipes = GitLabModel.annotateSourceBranches(pipes, openMRs: mrs)
+            if gitlabFailed { gitlabPipes = previousGitLab; mrs = previousGitLabMRs }
+            if githubFailed { githubPipes = previousGitHub }
+            if !pullsOK { githubMRs = previousGitHubMRs }
+            mrs = (mrs + githubMRs).sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+            var pipes = (gitlabPipes + githubPipes).sorted { ($0.updated ?? .distantPast) > ($1.updated ?? .distantPast) }
+            var notes: [String] = []
+            if gitlabFailed { notes.append("GitLab refresh incomplete. Showing the last GitLab activity.") }
+            if githubFailed { notes.append("GitHub Actions refresh incomplete. Showing the last GitHub activity.") }
+            if !pullsOK && (githubUser != nil || !previousGitHubMRs.isEmpty) { notes.append("GitHub pull requests refresh incomplete. Showing the last pull requests.") }
+            let note = notes.isEmpty ? nil : notes.joined(separator: " ")
             // Reuse jobs while status+sha are unchanged; only fetch the status-card pipe
             // and pipes that just left the active set (for failure detail).
             for i in pipes.indices {
-                let key = "\(pipes[i].projectID):\(pipes[i].id)"
+                let key = pipes[i].key
                 if let old = previousPipes[key], old.status == pipes[i].status, old.sha == pipes[i].sha, !old.jobs.isEmpty {
                     pipes[i].jobs = old.jobs
-                } else if let cached = GitLabModel.cachedJobs(projectID: pipes[i].projectID, pipelineID: pipes[i].id, status: pipes[i].status, sha: pipes[i].sha) {
+                } else if let cached = PipelineModel.cachedJobs(host: pipes[i].host, projectID: pipes[i].projectID, pipelineID: pipes[i].id, status: pipes[i].status, sha: pipes[i].sha) {
                     pipes[i].jobs = cached
                 }
             }
             let cardIndex = pipes.firstIndex(where: { $0.isRunning }) ?? (pipes.isEmpty ? nil : 0)
             if let i = cardIndex, pipes[i].jobs.isEmpty {
-                if case .success(let jobs) = GitLabModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
+                if case .success(let jobs) = PipelineModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
             }
             for i in pipes.indices where pipes[i].jobs.isEmpty {
-                let key = "\(pipes[i].projectID):\(pipes[i].id)"
+                let key = pipes[i].key
                 let leftActive = wasActive.contains(key) && !pipes[i].isRunning
                 if leftActive || (pipes[i].isFailed && !knownPipes.contains(key)) {
-                    if case .success(let jobs) = GitLabModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
+                    if case .success(let jobs) = PipelineModel.jobsForPipeline(pipes[i]) { pipes[i].jobs = jobs }
                 }
             }
             let card: Pipeline? = cardIndex.map { pipes[$0] }
@@ -185,9 +229,9 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
                 self.mergeRequests = mrs
                 self.pipelines = pipes
                 self.cardPipeline = card
-                self.lastGitLab = Date()
-                self.gitlabRefreshing = false
-                self.inbox.error = nil
+                self.lastRefresh = Date()
+                self.refreshInFlight = false
+                self.inbox.error = note
                 self.inbox.pipelines = pipes
                 self.inbox.mrs = mrs
                 self.inbox.updated = Date()
@@ -203,25 +247,26 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private func notifyChanges(_ pipes: [Pipeline]) {
         if baselineDone {
             for p in pipes {
-                let key = "\(p.projectID):\(p.id)"
+                let key = p.key
                 let before = lastPipelineStatus[key]
                 let changed = !seenPipelineIDs.contains(key) || (before != nil && before != p.status)
                 if changed && !p.isFailed {
                     let recovered = p.isSuccess &&
                         (before == "failed" || pipelines.contains { old in
-                            old.projectID == p.projectID && old.isFailed && old.id != p.id &&
+                            old.host == p.host && old.projectID == p.projectID && old.isFailed && old.id != p.id &&
+                            (p.host != .github || old.workflow == p.workflow) &&
                             ((old.ref == p.ref && (p.updated ?? .distantPast) > (old.updated ?? .distantPast))
                              || (!old.sha.isEmpty && old.sha == p.sha && p.id > old.id))
                         })
                     let title = recovered ? "Pipeline recovered" : "Pipeline \(p.status.replacingOccurrences(of: "_", with: " "))"
-                    publish(title, "\(p.project) #\(p.id) · \(p.ref)", status: p.status,
+                    publish(title, "\(p.project) #\(p.id) · \(p.refLabel)", status: p.status,
                             url: p.url, thread: key,
                             subtitle: "\(p.project) · #\(p.id)",
-                            bannerBody: "Branch: \(p.ref)",
+                            bannerBody: "Branch: \(p.refLabel)",
                             kind: .pipeline)
                 }
                 for j in p.jobs where j.status == "manual" {
-                    guard let previous = lastJobStatus["\(p.projectID):\(j.id)"], previous != j.status else { continue }
+                    guard let previous = lastJobStatus["\(p.key):\(j.id)"], previous != j.status else { continue }
                     publish("Action required",
                             "\(p.project) #\(p.id) · \(j.name): \(j.status) · \(p.ref)",
                             status: j.status, url: j.url, thread: key,
@@ -237,21 +282,21 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     /// One banner per unresolved pipeline or failed job. Remembered across launches.
     private func announceFailures(_ pipes: [Pipeline]) {
-        for p in GitLabModel.unresolvedFailures(pipes) {
-            guard claimFailure("\(p.projectID):\(p.id)") else { continue }
+        for p in PipelineModel.unresolvedFailures(pipes) {
+            guard claimFailure(p.key) else { continue }
             let failedJob = p.jobs.first { $0.status == "failed" }
-            publish("Pipeline failed", "\(p.project) #\(p.id) · \(p.ref)", status: "failed",
-                    url: failedJob?.url ?? p.url, thread: "\(p.projectID):\(p.id)",
+            publish("Pipeline failed", "\(p.project) #\(p.id) · \(p.refLabel)", status: "failed",
+                    url: failedJob?.url ?? p.url, thread: p.key,
                     subtitle: "\(p.project) · #\(p.id)",
-                    bannerBody: failedJob.map { "\($0.name) failed · \(p.ref)" } ?? "Branch: \(p.ref)",
+                    bannerBody: failedJob.map { "\($0.name) failed · \(p.refLabel)" } ?? "Branch: \(p.refLabel)",
                     kind: failedJob == nil ? .pipeline : .logs)
             for j in p.jobs where j.status == "failed" {
-                _ = claimFailure("\(p.projectID):job:\(j.id)")
+                _ = claimFailure("\(p.key):job:\(j.id)")
             }
         }
         for p in pipes where !p.isFailed {
             for j in p.jobs where j.status == "failed" {
-                guard claimFailure("\(p.projectID):job:\(j.id)") else { continue }
+                guard claimFailure("\(p.key):job:\(j.id)") else { continue }
                 publish("Job failed", "\(p.project) #\(p.id) · \(j.name): failed · \(p.ref)",
                         status: "failed", url: j.url, thread: "\(p.projectID):\(p.id)",
                         subtitle: "\(p.project) · #\(p.id)", bannerBody: "\(j.name) · \(p.ref)", kind: .logs)
@@ -260,7 +305,8 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     }
 
     private func claimFailure(_ key: String) -> Bool {
-        guard !notifiedFailureIDs.contains(key) else { return false }
+        if notifiedFailureIDs.contains(key) { return false }
+        if key.hasPrefix("gitlab:"), notifiedFailureIDs.contains(String(key.dropFirst("gitlab:".count))) { return false }
         notifiedFailureIDs.append(key)
         if notifiedFailureIDs.count > 300 { notifiedFailureIDs.removeFirst(notifiedFailureIDs.count - 300) }
         UserDefaults.standard.set(notifiedFailureIDs, forKey: "pipelinetracer.notifiedFailureIDs")
@@ -271,8 +317,8 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard baselineDone else { return }
         for mr in mrs where mr.isReady {
             guard !mergeRequests.contains(where: { $0.key == mr.key && $0.isReady }) else { continue }
-            publish("Ready to merge", "\(mr.project) !\(mr.iid) · \(mr.title)", status: "success",
-                    url: mr.url, thread: "mr-\(mr.key)", subtitle: "\(mr.project) · !\(mr.iid)",
+            publish("Ready to merge", "\(mr.project) \(mr.numberLabel) · \(mr.title)", status: "success",
+                    url: mr.url, thread: "mr-\(mr.key)", subtitle: "\(mr.project) · \(mr.numberLabel)",
                     bannerBody: mr.title, kind: .readyMergeRequest)
         }
     }
@@ -287,23 +333,23 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     private func record(_ pipes: [Pipeline]) {
         for p in pipes {
-            seenPipelineIDs.insert("\(p.projectID):\(p.id)")
-            lastPipelineStatus["\(p.projectID):\(p.id)"] = p.status
-            for j in p.jobs { lastJobStatus["\(p.projectID):\(j.id)"] = j.status }
+            seenPipelineIDs.insert(p.key)
+            lastPipelineStatus[p.key] = p.status
+            for j in p.jobs { lastJobStatus["\(p.key):\(j.id)"] = j.status }
         }
     }
 
     /// Menu bar text: merge requests, running and failed pipelines.
     func updateTitle() {
-        let running = GitLabModel.groupSameChange(pipelines.filter { $0.isRunning }).count
-        let failed = GitLabModel.groupSameChange(GitLabModel.unresolvedFailures(pipelines)).count
+        let running = PipelineModel.groupSameChange(pipelines.filter { $0.isRunning }).count
+        let failed = PipelineModel.groupSameChange(PipelineModel.unresolvedFailures(pipelines)).count
         let (status, progress) = PipelineProgressRing.state(for: cardPipeline)
         let button = statusItem.button
         button?.title = ""
         button?.image = MenuBarCapsule.image(mergeRequests: mergeRequests.count, running: running,
                                               failed: failed, status: status, progress: progress)
         button?.imagePosition = .imageOnly
-        button?.setAccessibilityLabel("Pipeline Tracer: \(mergeRequests.count) merge requests, \(running) running pipelines, \(failed) failed pipelines")
+        button?.setAccessibilityLabel("Pipeline Tracer: \(mergeRequests.count) requests, \(running) running pipelines, \(failed) failed pipelines")
         updateRing()
     }
 
@@ -313,7 +359,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         if let p = cardPipeline {
             let done = p.jobs.filter { ["success", "passed", "failed", "canceled", "cancelled", "skipped"].contains($0.status) }.count
             let jobLine = p.jobs.isEmpty ? "" : "\n\(done)/\(p.jobs.count) jobs finished"
-            button.toolTip = "\(p.project) #\(p.id) · \(p.ref)\n\(p.status)\(jobLine)"
+            button.toolTip = "\(p.project) #\(p.id) · \(p.refLabel)\n\(p.status)\(jobLine)"
         } else {
             button.toolTip = "No recent pipelines"
         }
@@ -323,9 +369,9 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     private func rebuild() {
         menu.removeAllItems()
-        let running = GitLabModel.groupSameChange(pipelines.filter { $0.isRunning }).count
-        let failedNow = GitLabModel.unresolvedFailures(pipelines)
-        let failed = GitLabModel.groupSameChange(failedNow).count
+        let running = PipelineModel.groupSameChange(pipelines.filter { $0.isRunning }).count
+        let failedNow = PipelineModel.unresolvedFailures(pipelines)
+        let failed = PipelineModel.groupSameChange(failedNow).count
         let card = NSMenuItem()
         card.view = PipelineCard.view(for: cardPipeline,
                                       summary: "\(mergeRequests.count) MRs · \(running) running · \(failed) failed",
@@ -340,7 +386,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             addHeader("Failed")
             for p in failedNow.prefix(20) { menu.addItem(pipelineItem(p)) }
         }
-        menu.addItem(submenuItem("Merge requests (\(mergeRequests.count))", buildMergeRequests()))
+        menu.addItem(submenuItem("Requests (\(mergeRequests.count))", buildMergeRequests()))
         menu.addItem(submenuItem("Pipelines (\(pipelines.count))", buildPipelines()))
 
         menu.addItem(.separator())
@@ -349,14 +395,14 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             addHeader("Working: \(pendingLabels[0])" + (pendingLabels.count > 1 ? " (+\(pendingLabels.count - 1) queued)" : ""))
         }
         if let r = lastResult { addHeader(r) }
-        menu.addItem(actionItem("Refresh now") { self.refreshGitLab() })
+        menu.addItem(actionItem("Refresh now") { self.refreshPipelines() })
         menu.addItem(.separator())
         menu.addItem(actionItem("Quit Pipeline Tracer") { NSApp.terminate(nil) })
     }
 
     private func buildMergeRequests() -> NSMenu {
         let m = NSMenu()
-        if mergeRequests.isEmpty { m.addItem(disabled("No open merge requests", .dim)) }
+        if mergeRequests.isEmpty { m.addItem(disabled("No open requests", .dim)) }
         for mr in mergeRequests {
             let sub = NSMenu()
             sub.addItem(disabled(mr.title, .plain))
@@ -366,9 +412,9 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             if mr.isReady && PipelineTracerPrefs.mergeButton {
                 sub.addItem(actionItem("Merge…") { self.confirmMerge(mr) })
             }
-            sub.addItem(actionItem("Close MR…") { self.confirmClose(mr) })
+            sub.addItem(actionItem(mr.host == .github ? "Close PR…" : "Close MR…") { self.confirmClose(mr) })
             let tone: Tone = mr.isReady ? .good : mr.draft ? .dim : toneFor(pipeline: mr.pipelineStatus)
-            m.addItem(submenuItem("\(glyphForMR(mr)) \(mr.project) !\(mr.iid) — \(mr.title)", sub, tone: tone))
+            m.addItem(submenuItem("\(glyphForMR(mr)) \(mr.project) \(mr.numberLabel) — \(mr.title)", sub, tone: tone))
         }
         return m
     }
@@ -387,12 +433,12 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     /// One pipeline as a dropdown row (with its stages and jobs in a submenu).
     private func pipelineItem(_ p: Pipeline) -> NSMenuItem {
         let (g, tone) = pipelineGlyph(p.status)
-        return submenuItem("\(g) \(p.project) #\(p.id) · \(p.ref)", pipelineMenu(p), tone: tone)
+        return submenuItem("\(g) \(p.project) #\(p.id) · \(p.refLabel)", pipelineMenu(p), tone: tone)
     }
 
     private func pipelineMenu(_ p: Pipeline) -> NSMenu {
         let sub = NSMenu()
-        sub.addItem(disabled("\(p.status) · \(p.ref)", pipelineGlyph(p.status).1))
+        sub.addItem(disabled("\(p.status) · \(p.refLabel)", pipelineGlyph(p.status).1))
         if !p.jobs.isEmpty {
             let done = p.jobs.filter { $0.status == "success" }.count
             let failed = p.jobs.filter { $0.status == "failed" }.count
@@ -430,16 +476,16 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         let m = NSMenu()
         let gl = NSMenu()
         gl.addItem(submenuItem("Refresh every", choiceMenu(
-            PipelineTracerPrefs.gitlabRefreshChoices.map { ("\($0) seconds", $0) },
-            current: PipelineTracerPrefs.gitlabRefreshSeconds) { PipelineTracerPrefs.gitlabRefreshSeconds = $0 }))
+            PipelineTracerPrefs.refreshChoices.map { ("\($0) seconds", $0) },
+            current: PipelineTracerPrefs.refreshSeconds) { PipelineTracerPrefs.refreshSeconds = $0 }))
         gl.addItem(submenuItem("Finished pipelines shown for", choiceMenu(
             PipelineTracerPrefs.pipelineHourChoices.map { ($0 == 1 ? "1 hour" : "\($0) hours", $0) },
-            current: PipelineTracerPrefs.pipelineHours) { PipelineTracerPrefs.pipelineHours = $0; self.refreshGitLab() }))
+            current: PipelineTracerPrefs.pipelineHours) { PipelineTracerPrefs.pipelineHours = $0; self.refreshPipelines() }))
         gl.addItem(.separator())
         gl.addItem(toggleItem("Enable merge button", PipelineTracerPrefs.mergeButton) {
             PipelineTracerPrefs.mergeButton.toggle(); self.updateTitle()
         })
-        m.addItem(submenuItem("GitLab", gl))
+        m.addItem(submenuItem("Pipelines", gl))
         return m
     }
 
@@ -466,10 +512,10 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard inbox.merging == nil, inbox.closing == nil else { return }
         popover.performClose(nil)
         inbox.merging = mr.key
-        enqueue("Merge !\(mr.iid)", successTitle: "Merge complete", failureTitle: "Merge failed", successStatus: "merged",
-                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · !\(mr.iid)",
-                refresh: { self.refreshGitLab() }) {
-            switch GitLabModel.merge(mr) {
+        enqueue("Merge \(mr.numberLabel)", successTitle: "Merge complete", failureTitle: "Merge failed", successStatus: "merged",
+                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · \(mr.numberLabel)",
+                refresh: { self.refreshPipelines() }) {
+            switch PipelineModel.merge(mr) {
             case .merged: return nil
             case .failed(let msg): return msg
             }
@@ -480,10 +526,10 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard inbox.merging == nil, inbox.closing == nil else { return }
         popover.performClose(nil)
         inbox.closing = mr.key
-        enqueue("Close !\(mr.iid)", successTitle: "MR closed", failureTitle: "Close failed", successStatus: "canceled",
-                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · !\(mr.iid)",
-                refresh: { self.refreshGitLab() }) {
-            switch GitLabModel.close(mr) {
+        enqueue("Close \(mr.numberLabel)", successTitle: mr.host == .github ? "PR closed" : "MR closed", failureTitle: "Close failed", successStatus: "canceled",
+                completionURL: mr.url, completionDetail: mr.title, completionSubtitle: "\(mr.project) · \(mr.numberLabel)",
+                refresh: { self.refreshPipelines() }) {
+            switch PipelineModel.close(mr) {
             case .closed: return nil
             case .failed(let msg): return msg
             }
@@ -519,7 +565,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     }
 
     private func open(_ url: String) {
-        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+        if let u = Shell.browserURL(url) { NSWorkspace.shared.open(u) }
     }
 
     // MARK: - Menu item helpers

@@ -1,7 +1,7 @@
 import AppKit
 
 /// The status card at the top of the dropdown: overall state, stage timeline, job rows,
-/// and a link to the pipeline. Presentation only; it reads a `Pipeline` from GitLabModel.
+/// and a link to the pipeline. Presentation only; it reads a `Pipeline` from PipelineModel.
 enum PipelineCard {
     static let width: CGFloat = 330
 
