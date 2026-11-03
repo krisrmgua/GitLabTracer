@@ -7,7 +7,7 @@ Issues and pull requests are welcome.
 3. From `menubar/`, run:
 
 ```bash
-swift run GitLabTracer --self-check
+swift run PipelineTracer --self-check
 ```
 
 4. Do not commit GitLab tokens, job logs, or private project data. Sample data in the repo uses `example/` paths.

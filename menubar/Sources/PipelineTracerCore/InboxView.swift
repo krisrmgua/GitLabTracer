@@ -182,7 +182,7 @@ struct InboxView: View {
         if state.settings { return "Preferences" }
         if state.notifications { return "Notifications" }
         if state.history { return "Recent successes" }
-        return "GitLab Tracer"
+        return "Pipeline Tracer"
     }
     private var canGoBack: Bool {
         state.selectedPipeline != nil || state.selectedMR != nil || state.settings || state.notifications || state.history
@@ -342,7 +342,7 @@ struct InboxView: View {
                     Image(systemName: "chevron.up").font(.system(size: 11, weight: .semibold))
                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(InboxRowStyle())
-            Text("\(GitLabTracerPrefs.pipelineHours)-hour pipeline window · merge events from this session").font(.system(size: 9)).foregroundColor(.secondary)
+            Text("\(PipelineTracerPrefs.pipelineHours)-hour pipeline window · merge events from this session").font(.system(size: 9)).foregroundColor(.secondary)
             panel {
                     if finished.isEmpty && mergedEvents.isEmpty { compactEmpty("No recent completions") }
                     ForEach(Array(finished.prefix(30).enumerated()), id: \.element.id) { _, p in
@@ -560,7 +560,7 @@ struct InboxView: View {
             Text("This session · failures alert with sound; routine successes stay quiet").font(.system(size: 9)).foregroundColor(.secondary)
         }
     }
-    private func eventProject(_ event: ActivityEvent) -> String { event.detail.components(separatedBy: " ").first ?? "GitLab Tracer" }
+    private func eventProject(_ event: ActivityEvent) -> String { event.detail.components(separatedBy: " ").first ?? "Pipeline Tracer" }
     private func eventGroups(_ events: [ActivityEvent]) -> [String] { var seen = Set<String>(); return events.map(eventProject).filter { seen.insert($0).inserted } }
     private func activateEvent(_ event: ActivityEvent) {
         if let pipeline = model.pipelines.first(where: { $0.url == event.url || $0.jobs.contains(where: { $0.url == event.url }) }) {
@@ -728,7 +728,7 @@ struct InboxView: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        if GitLabTracerPrefs.mergeButton {
+                        if PipelineTracerPrefs.mergeButton {
                             Button {
                                 state.confirmingMerge = true
                             } label: {
@@ -754,7 +754,7 @@ struct InboxView: View {
                         .disabled(model.merging != nil || model.closing != nil || state.mrLoading)
                         .fixedSize(horizontal: true, vertical: false)
                     }
-                    if GitLabTracerPrefs.mergeButton {
+                    if PipelineTracerPrefs.mergeButton {
                         Text(mr.isReady ? "Ready to merge." : "Merge unavailable: \(mrState(mr)).")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(mr.isReady ? .green : .red)
@@ -857,15 +857,15 @@ struct InboxView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Panel").font(.system(size: 12, weight: .semibold))
             panel {
-                preferenceToggle("Reopen where I left off", value: GitLabTracerPrefs.rememberPlace, refresh: false) { GitLabTracerPrefs.rememberPlace = $0 }
+                preferenceToggle("Reopen where I left off", value: PipelineTracerPrefs.rememberPlace, refresh: false) { PipelineTracerPrefs.rememberPlace = $0 }
             }
             Text("GitLab").font(.system(size: 12, weight: .semibold))
             panel {
-                preferenceChoice("Refresh interval", options: GitLabTracerPrefs.gitlabRefreshChoices, value: GitLabTracerPrefs.gitlabRefreshSeconds, suffix: "seconds") { GitLabTracerPrefs.gitlabRefreshSeconds = $0; model.refresh() }
+                preferenceChoice("Refresh interval", options: PipelineTracerPrefs.gitlabRefreshChoices, value: PipelineTracerPrefs.gitlabRefreshSeconds, suffix: "seconds") { PipelineTracerPrefs.gitlabRefreshSeconds = $0; model.refresh() }
                 rowDivider
-                preferenceChoice("Completion history", options: GitLabTracerPrefs.pipelineHourChoices, value: GitLabTracerPrefs.pipelineHours, suffix: "hours") { GitLabTracerPrefs.pipelineHours = $0; model.refresh() }
+                preferenceChoice("Completion history", options: PipelineTracerPrefs.pipelineHourChoices, value: PipelineTracerPrefs.pipelineHours, suffix: "hours") { PipelineTracerPrefs.pipelineHours = $0; model.refresh() }
                 rowDivider
-                preferenceToggle("Show merge actions", value: GitLabTracerPrefs.mergeButton) { GitLabTracerPrefs.mergeButton = $0 }
+                preferenceToggle("Show merge actions", value: PipelineTracerPrefs.mergeButton) { PipelineTracerPrefs.mergeButton = $0 }
             }
             Text("Notifications").font(.system(size: 12, weight: .semibold))
             panel {
@@ -876,7 +876,7 @@ struct InboxView: View {
                               systemImage: enabled ? "checkmark.circle" : "bell.slash")
                             .font(.system(size: 10)).foregroundColor(enabled ? .green : .orange)
                     }
-                    Text("Failures are titled GitLab Tracer and play a sound. macOS chooses the banner colors. Expand a notification for View MR, View pipeline, or View logs.").font(.system(size: 10)).foregroundColor(.secondary)
+                    Text("Failures are titled Pipeline Tracer and play a sound. macOS chooses the banner colors. Expand a notification for View MR, View pipeline, or View logs.").font(.system(size: 10)).foregroundColor(.secondary)
                     HStack {
                         Button("Notification settings") {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
@@ -886,7 +886,7 @@ struct InboxView: View {
                     }
                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack { Spacer(); Button("Quit GitLab Tracer") { NSApp.terminate(nil) }.buttonStyle(DeckInlineStyle()) }
+            HStack { Spacer(); Button("Quit Pipeline Tracer") { NSApp.terminate(nil) }.buttonStyle(DeckInlineStyle()) }
         }
     }
     private func preferenceChoice(_ title: String, options: [Int], value: Int, suffix: String, set: @escaping (Int) -> Void) -> some View {

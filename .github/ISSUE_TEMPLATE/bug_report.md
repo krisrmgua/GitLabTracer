@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in GitLab Tracer is wrong
+about: Something in Pipeline Tracer is wrong
 title: ""
 labels: bug
 ---
@@ -17,7 +17,7 @@ labels: bug
 ## Environment
 
 - macOS version:
-- GitLab Tracer commit or install date:
+- Pipeline Tracer commit or install date:
 - `glab version`:
 
 Do not paste tokens, job logs, or private project names if they are not needed to explain the bug.

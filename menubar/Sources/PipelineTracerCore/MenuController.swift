@@ -75,7 +75,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         inbox.merge = { [weak self] mr in self?.confirmMerge(mr) }
         inbox.close = { [weak self] mr in self?.confirmClose(mr) }
         inbox.refresh = { [weak self] in self?.scheduleTimers(); self?.refreshGitLab() }
-        statusItem.button?.title = "GitLab Tracer"
+        statusItem.button?.title = "Pipeline Tracer"
     }
 
     deinit {
@@ -85,7 +85,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     }
 
     public func popoverDidClose(_ notification: Notification) {
-        guard !GitLabTracerPrefs.rememberPlace else { return }
+        guard !PipelineTracerPrefs.rememberPlace else { return }
         viewState.returnToOverview()
     }
 
@@ -104,7 +104,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         scheduleTimers()
         if CommandLine.arguments.contains("--review-window") {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "GitLab Tracer — Live review"
+            window.title = "Pipeline Tracer — Live review"
             window.contentView = NSHostingView(rootView: InboxView(model: inbox, state: viewState))
             reviewWindow = window
             window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -115,7 +115,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     /// (Re)starts the GitLab refresh timer from the current setting.
     private func scheduleTimers() {
         gitlabTimer?.invalidate()
-        gitlabTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(GitLabTracerPrefs.gitlabRefreshSeconds), repeats: true) { [weak self] _ in
+        gitlabTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(PipelineTracerPrefs.gitlabRefreshSeconds), repeats: true) { [weak self] _ in
             self?.refreshGitLab()
         }
     }
@@ -148,7 +148,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             }
             let failure = SnapshotFailure()
             let mrs = GitLabModel.fetchOpenMergeRequests(onFailure: { failure.mark() })
-            var pipes = GitLabModel.fetchPipelines(hours: GitLabTracerPrefs.pipelineHours, onFailure: { failure.mark() })
+            var pipes = GitLabModel.fetchPipelines(hours: PipelineTracerPrefs.pipelineHours, onFailure: { failure.mark() })
             if failure.failed {
                 DispatchQueue.main.async {
                     self.gitlabRefreshing = false; self.inbox.refreshing = false
@@ -303,7 +303,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         button?.image = MenuBarCapsule.image(mergeRequests: mergeRequests.count, running: running,
                                               failed: failed, status: status, progress: progress)
         button?.imagePosition = .imageOnly
-        button?.setAccessibilityLabel("GitLab Tracer: \(mergeRequests.count) merge requests, \(running) running pipelines, \(failed) failed pipelines")
+        button?.setAccessibilityLabel("Pipeline Tracer: \(mergeRequests.count) merge requests, \(running) running pipelines, \(failed) failed pipelines")
         updateRing()
     }
 
@@ -351,7 +351,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         if let r = lastResult { addHeader(r) }
         menu.addItem(actionItem("Refresh now") { self.refreshGitLab() })
         menu.addItem(.separator())
-        menu.addItem(actionItem("Quit GitLab Tracer") { NSApp.terminate(nil) })
+        menu.addItem(actionItem("Quit Pipeline Tracer") { NSApp.terminate(nil) })
     }
 
     private func buildMergeRequests() -> NSMenu {
@@ -363,7 +363,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             sub.addItem(disabled("Pipeline: \(mr.pipelineStatus ?? "none") · \(mr.isReady ? "ready" : mr.draft ? "draft" : mr.mergeStatus)", toneFor(pipeline: mr.pipelineStatus)))
             sub.addItem(.separator())
             sub.addItem(actionItem("Open in browser") { self.open(mr.url) })
-            if mr.isReady && GitLabTracerPrefs.mergeButton {
+            if mr.isReady && PipelineTracerPrefs.mergeButton {
                 sub.addItem(actionItem("Merge…") { self.confirmMerge(mr) })
             }
             sub.addItem(actionItem("Close MR…") { self.confirmClose(mr) })
@@ -430,14 +430,14 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         let m = NSMenu()
         let gl = NSMenu()
         gl.addItem(submenuItem("Refresh every", choiceMenu(
-            GitLabTracerPrefs.gitlabRefreshChoices.map { ("\($0) seconds", $0) },
-            current: GitLabTracerPrefs.gitlabRefreshSeconds) { GitLabTracerPrefs.gitlabRefreshSeconds = $0 }))
+            PipelineTracerPrefs.gitlabRefreshChoices.map { ("\($0) seconds", $0) },
+            current: PipelineTracerPrefs.gitlabRefreshSeconds) { PipelineTracerPrefs.gitlabRefreshSeconds = $0 }))
         gl.addItem(submenuItem("Finished pipelines shown for", choiceMenu(
-            GitLabTracerPrefs.pipelineHourChoices.map { ($0 == 1 ? "1 hour" : "\($0) hours", $0) },
-            current: GitLabTracerPrefs.pipelineHours) { GitLabTracerPrefs.pipelineHours = $0; self.refreshGitLab() }))
+            PipelineTracerPrefs.pipelineHourChoices.map { ($0 == 1 ? "1 hour" : "\($0) hours", $0) },
+            current: PipelineTracerPrefs.pipelineHours) { PipelineTracerPrefs.pipelineHours = $0; self.refreshGitLab() }))
         gl.addItem(.separator())
-        gl.addItem(toggleItem("Enable merge button", GitLabTracerPrefs.mergeButton) {
-            GitLabTracerPrefs.mergeButton.toggle(); self.updateTitle()
+        gl.addItem(toggleItem("Enable merge button", PipelineTracerPrefs.mergeButton) {
+            PipelineTracerPrefs.mergeButton.toggle(); self.updateTitle()
         })
         m.addItem(submenuItem("GitLab", gl))
         return m

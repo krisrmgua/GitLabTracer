@@ -1,6 +1,6 @@
 # Security
 
-GitLab Tracer does not store your GitLab password or personal access token. `glab` does. This app stores preferences and the ids of failure notifications it has already shown.
+Pipeline Tracer does not store your GitLab password or personal access token. `glab` does. This app stores preferences and the ids of failure notifications it has already shown.
 
 ## Reporting
 

@@ -27,7 +27,7 @@ public final class StatusChecks {
         let body = "Fix e2e: " + String(repeating: "calendar ", count: 30)
         let content = Notifier.content("Merge complete", subtitle: "example/app · !347", body: body,
                                        thread: "mr-347", important: false, url: "https://gitlab.com/group/repo/-/merge_requests/347", kind: .mergeRequest)
-        precondition(content.title == "GitLab Tracer")
+        precondition(content.title == "Pipeline Tracer")
         precondition(content.subtitle == "Merge complete")
         precondition(content.body.hasPrefix("example/app · !347"))
         precondition(content.body.count == 90 && content.body.hasSuffix("…"))
@@ -35,7 +35,7 @@ public final class StatusChecks {
         precondition(content.threadIdentifier == "mr-347")
         let failed = Notifier.content("Job failed", subtitle: "group/repo · #12", body: "test:integration\n failed",
                                       thread: "1:12", important: true, url: "https://gitlab.com/group/repo/-/jobs/42", kind: .logs)
-        precondition(failed.title == "GitLab Tracer")
+        precondition(failed.title == "Pipeline Tracer")
         precondition(failed.subtitle == "Job failed")
         precondition(failed.body == "group/repo · #12 · test:integration failed")
         precondition(failed.sound != nil && failed.interruptionLevel == .timeSensitive && failed.categoryIdentifier == "logs")
@@ -45,9 +45,9 @@ public final class StatusChecks {
         let key = "gitlabtracer.rememberPlace"
         let previous = UserDefaults.standard.object(forKey: key)
         UserDefaults.standard.removeObject(forKey: key)
-        precondition(!GitLabTracerPrefs.rememberPlace)
-        GitLabTracerPrefs.rememberPlace = true
-        precondition(GitLabTracerPrefs.rememberPlace)
+        precondition(!PipelineTracerPrefs.rememberPlace)
+        PipelineTracerPrefs.rememberPlace = true
+        precondition(PipelineTracerPrefs.rememberPlace)
         if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
         let state = InboxViewState()
         state.settings = true
