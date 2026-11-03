@@ -363,28 +363,39 @@ struct InboxView: View {
         if minutes < 1440 { return "\(minutes / 60)h ago" }
         return "\(minutes / 1440)d ago"
     }
+    /// Green ready, orange waiting (approval/CI), red blocked, gray draft/other.
     private func mrTone(_ mr: MergeRequest) -> String {
         if mr.isReady { return "ready" }
         if mr.draft { return "pending" }
-        if mr.pipelineStatus == "failed" || mr.mergeStatus == "conflict" { return "failed" }
-        if mr.mergeStatus == "ci_still_running" { return "running" }
+        switch mr.mergeStatus {
+        case "conflict", "broken_status", "blocked_status", "policies_denied":
+            return "failed"
+        case "ci_still_running", "ci_must_pass", "not_approved", "approvals_syncing",
+             "discussions_not_resolved", "requested_changes", "checking", "unchecked",
+             "external_status_checks", "preparing", "prepared":
+            return "running"
+        default:
+            break
+        }
+        if mr.pipelineStatus == "failed" { return "failed" }
+        if mr.pipelineStatus == "running" { return "running" }
         return "pending"
     }
     private func mrState(_ mr: MergeRequest) -> String {
         mr.draft ? "Draft" : mr.isReady ? "Ready to merge" : Deck.title(mr.mergeStatus)
     }
     private func mrRow(_ mr: MergeRequest) -> some View {
-        Button { showMR(mr) } label: {
+        let tone = mrTone(mr)
+        let color = Deck.color(tone)
+        return Button { showMR(mr) } label: {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.branch").font(.system(size: 19, weight: .medium)).foregroundColor(Deck.color(mrTone(mr))).frame(width: 22)
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 19, weight: .medium)).foregroundColor(color).frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("!\(String(mr.iid))  \(mr.title)").font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Text(mr.project).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) {
-                    if mr.isReady { Circle().fill(Deck.cyan).frame(width: 6, height: 6) }
-                    Text(mrState(mr)).font(.system(size: 10)).foregroundColor(mr.isReady ? Deck.cyan : .secondary).lineLimit(1)
-                }.frame(maxWidth: 100, alignment: .trailing)
+                Text(mrState(mr)).font(.system(size: 10)).foregroundColor(color).lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Image(systemName: "chevron.right").font(.system(size: 10)).foregroundColor(.secondary)
             }.padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
         }.buttonStyle(InboxRowStyle()).help("!\(String(mr.iid)) \(mr.title) — \(mrState(mr))")
@@ -636,13 +647,14 @@ struct InboxView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack { Text("Merge requests").font(.system(size: 12, weight: .semibold)); countLabel(model.mrs.count, Deck.cyan) }.padding(.bottom, 8)
                     ForEach(model.mrs, id: \.key) { item in
+                        let color = Deck.color(mrTone(item))
                         Button { showMR(item) } label: {
                             HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "arrow.triangle.branch").foregroundColor(Deck.color(mrTone(item)))
+                                Image(systemName: "arrow.triangle.branch").foregroundColor(color)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("!\(String(item.iid))  \(item.title)").font(.system(size: 11, weight: .medium)).lineLimit(2)
                                     Text(item.project).font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
-                                    Text(mrState(item)).font(.system(size: 9)).foregroundColor(item.isReady ? Deck.cyan : .secondary)
+                                    Text(mrState(item)).font(.system(size: 9)).foregroundColor(color)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }.padding(9).background(item.key == mr.key ? Deck.cyan.opacity(0.12) : Color.clear).cornerRadius(7)
                         }.buttonStyle(.plain)
