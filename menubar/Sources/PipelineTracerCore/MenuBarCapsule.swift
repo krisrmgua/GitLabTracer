@@ -17,8 +17,10 @@ enum MenuBarCapsule {
         // circle can grow without kissing the top/bottom edge.
         let height: CGFloat = 26
         let padY: CGFloat = 3
+        let ringX: CGFloat = 5
         let ringSize = height - padY * 2
-        let width: CGFloat = strings.isEmpty ? 32 :
+        // Ring-only capsules use the same inset on both sides. A fixed 32 left a gap on the right.
+        let width: CGFloat = strings.isEmpty ? ringX + ringSize + ringX :
             38 + strings.reduce(CGFloat(0)) { $0 + ceil($1.size().width) } + CGFloat(strings.count - 1) * 16
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             let capsule = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
@@ -29,8 +31,8 @@ enum MenuBarCapsule {
             capsule.lineWidth = 0.5
             capsule.stroke()
             PipelineProgressRing.image(status: status, progress: progress)
-                .draw(in: NSRect(x: 5, y: padY, width: ringSize, height: ringSize))
-            var x: CGFloat = 5 + ringSize + 6
+                .draw(in: NSRect(x: ringX, y: padY, width: ringSize, height: ringSize))
+            var x: CGFloat = ringX + ringSize + 6
             for (index, string) in strings.enumerated() {
                 string.draw(at: NSPoint(x: x, y: (height - string.size().height) / 2))
                 x += ceil(string.size().width)
