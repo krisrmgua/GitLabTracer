@@ -8,7 +8,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
     public override init() { super.init() }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        if let icon = Bundle.main.url(forResource: "GitLabTracer", withExtension: "icns"),
+        if let icon = Bundle.main.url(forResource: "PipelineTracer", withExtension: "icns"),
            let image = NSImage(contentsOf: icon) {
             NSApp.applicationIconImage = image
         }

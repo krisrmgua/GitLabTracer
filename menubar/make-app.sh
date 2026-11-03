@@ -1,30 +1,30 @@
 #!/bin/bash
-# Assembles GitLab Tracer.app from the SwiftPM release build.
+# Assembles Pipeline Tracer.app from the SwiftPM release build.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP="GitLab Tracer.app"
+APP="Pipeline Tracer.app"
 BUNDLE_ID="com.kris.gitlabtracer"
 
 swift build -c release
-BIN="$(swift build -c release --show-bin-path)/GitLabTracer"
+BIN="$(swift build -c release --show-bin-path)/PipelineTracer"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/GitLabTracer"
-cp Artwork/GitLabTracer.icns "$APP/Contents/Resources/GitLabTracer.icns"
+cp "$BIN" "$APP/Contents/MacOS/PipelineTracer"
+cp Artwork/PipelineTracer.icns "$APP/Contents/Resources/PipelineTracer.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>GitLab Tracer</string>
-  <key>CFBundleDisplayName</key><string>GitLab Tracer</string>
-  <key>CFBundleExecutable</key><string>GitLabTracer</string>
+  <key>CFBundleName</key><string>Pipeline Tracer</string>
+  <key>CFBundleDisplayName</key><string>Pipeline Tracer</string>
+  <key>CFBundleExecutable</key><string>PipelineTracer</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-  <key>CFBundleIconName</key><string>GitLabTracer</string>
-  <key>CFBundleIconFile</key><string>GitLabTracer.icns</string>
+  <key>CFBundleIconName</key><string>PipelineTracer</string>
+  <key>CFBundleIconFile</key><string>PipelineTracer.icns</string>
   <key>CFBundleVersion</key><string>3</string>
   <key>CFBundleShortVersionString</key><string>1.1</string>
   <key>CFBundlePackageType</key><string>APPL</string>

@@ -1,16 +1,18 @@
 #!/bin/bash
-# Builds GitLab Tracer.app, installs it to ~/Applications, and starts it at login (LaunchAgent).
+# Builds Pipeline Tracer.app, installs it to ~/Applications, and starts it at login (LaunchAgent).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 LABEL="com.kris.gitlabtracer"
-APP_DEST="$HOME/Applications/GitLab Tracer.app"
+APP_DEST="$HOME/Applications/Pipeline Tracer.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 ./make-app.sh
 pkill -x GitLabTracer 2>/dev/null || true
+pkill -x PipelineTracer 2>/dev/null || true
+rm -rf "$HOME/Applications/GitLab Tracer.app"
 rm -rf "$APP_DEST"
-cp -R "GitLab Tracer.app" "$APP_DEST"
+cp -R "Pipeline Tracer.app" "$APP_DEST"
 
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$PLIST" <<PLIST
@@ -20,7 +22,7 @@ cat > "$PLIST" <<PLIST
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$APP_DEST/Contents/MacOS/GitLabTracer</string></array>
+  <array><string>$APP_DEST/Contents/MacOS/PipelineTracer</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
 </dict>

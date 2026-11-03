@@ -1,5 +1,5 @@
 import AppKit
-import GitLabTracerCore
+import PipelineTracerCore
 
 if CommandLine.arguments.contains("--preview") || Bundle.main.bundleIdentifier == "com.kris.gitlabtracer.preview" { Preview.run(); exit(0) }
 

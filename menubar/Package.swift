@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "GitLabTracer",
+    name: "PipelineTracer",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "GitLabTracer", targets: ["GitLabTracer"]),
+        .executable(name: "PipelineTracer", targets: ["PipelineTracer"]),
     ],
     targets: [
-        .target(name: "GitLabTracerCore", path: "Sources/GitLabTracerCore"),
-        .executableTarget(name: "GitLabTracer", dependencies: ["GitLabTracerCore"], path: "Sources/GitLabTracer"),
+        .target(name: "PipelineTracerCore", path: "Sources/PipelineTracerCore"),
+        .executableTarget(name: "PipelineTracer", dependencies: ["PipelineTracerCore"], path: "Sources/PipelineTracer"),
     ]
 )

@@ -1,7 +1,7 @@
 import AppKit
 
 /// GitLab behavior preferences saved in UserDefaults.
-enum GitLabTracerPrefs {
+enum PipelineTracerPrefs {
     private static let gitlabRefreshKey = "gitlabtracer.gitlabRefreshSeconds"
     private static let pipelineHoursKey = "gitlabtracer.pipelineHours"
     private static let mergeButtonKey = "gitlabtracer.mergeButton"

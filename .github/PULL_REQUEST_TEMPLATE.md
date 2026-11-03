@@ -4,5 +4,5 @@
 
 ## Test plan
 
-- [ ] `swift run GitLabTracer --self-check`
+- [ ] `swift run PipelineTracer --self-check`
 - [ ] 

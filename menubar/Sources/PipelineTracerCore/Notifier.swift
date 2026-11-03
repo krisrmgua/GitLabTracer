@@ -18,8 +18,8 @@ enum Notifier {
         }
         UNUserNotificationCenter.current().setNotificationCategories(Set(categories))
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error { NSLog("GitLab Tracer notification authorization failed: %@", error.localizedDescription) }
-            if CommandLine.arguments.contains("--notification-preview") { NSLog("GitLab Tracer notification permission granted: %@", String(granted)) }
+            if let error { NSLog("Pipeline Tracer notification authorization failed: %@", error.localizedDescription) }
+            if CommandLine.arguments.contains("--notification-preview") { NSLog("Pipeline Tracer notification permission granted: %@", String(granted)) }
             DispatchQueue.main.async { completion(granted) }
         }
     }
@@ -46,7 +46,7 @@ enum Notifier {
     static func content(_ title: String, subtitle: String, body: String, thread: String,
                         important: Bool, url: String, kind: Kind) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        content.title = "GitLab Tracer"
+        content.title = "Pipeline Tracer"
         content.subtitle = compact(title, limit: 80)
         let detail = [subtitle, body].map { compact($0, limit: 180) }.filter { !$0.isEmpty }.joined(separator: " · ")
         content.body = compact(detail)
@@ -70,7 +70,7 @@ enum Notifier {
                               important: important, url: url, kind: kind)
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
-            if let error { NSLog("GitLab Tracer notification delivery failed: %@", error.localizedDescription) }
+            if let error { NSLog("Pipeline Tracer notification delivery failed: %@", error.localizedDescription) }
         }
     }
 

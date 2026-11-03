@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: An improvement to GitLab Tracer
+about: An improvement to Pipeline Tracer
 title: ""
 labels: enhancement
 ---

@@ -1,6 +1,6 @@
-# GitLab Tracer
+# Pipeline Tracer
 
-GitLab Tracer is a macOS menu-bar app for the GitLab.com activity that is yours: open merge requests you created, pipelines on projects you belong to, failed jobs, and a merge button that re-checks GitLab before it merges.
+Pipeline Tracer is a macOS menu-bar app for the GitLab.com activity that is yours: open merge requests you created, pipelines on projects you belong to, failed jobs, and a merge button that re-checks GitLab before it merges.
 
 The panel is a dark activity inbox. Failures stay at the top until a later pipeline for that same commit succeeds. Clicking away closes the panel. The next open returns to the overview unless you turn on **Reopen where I left off**.
 
@@ -8,7 +8,7 @@ Requires **macOS 13** or later, the Swift command-line tools, and [`glab`](https
 
 ## Install glab and sign in
 
-GitLab Tracer does not ask for your GitLab password and it does not store a personal access token. `glab` owns the token. Install it, then log in once:
+Pipeline Tracer does not ask for your GitLab password and it does not store a personal access token. `glab` owns the token. Install it, then log in once:
 
 ```bash
 brew install glab
@@ -38,19 +38,19 @@ You can install with `read_api` only. Leave the merge button off in preferences 
 ## Install the app
 
 ```bash
-git clone https://github.com/krisrmgua/GitLabTracer.git
-cd GitLabTracer/menubar
+git clone https://github.com/krisrmgua/PipelineTracer.git
+cd PipelineTracer/menubar
 ./install.sh
 ```
 
-That builds `GitLab Tracer.app`, copies it to `~/Applications/GitLab Tracer.app`, and starts it at login. Run `./install.sh` again to update. The bundle id is `com.kris.gitlabtracer`.
+That builds `Pipeline Tracer.app`, copies it to `~/Applications/Pipeline Tracer.app`, and starts it at login. Run `./install.sh` again to update. The bundle id is `com.kris.gitlabtracer`.
 
 A manual build, without installing, is:
 
 ```bash
 cd menubar
 ./make-app.sh
-open "GitLab Tracer.app"
+open "Pipeline Tracer.app"
 ```
 
 Quit and rerun `./install.sh` after you change the source if you want the menu-bar copy updated.
@@ -85,7 +85,7 @@ The back control is the chevron and the title together. A section header toggles
 
 ### Notifications
 
-Banners are titled **GitLab Tracer**. Failures play the default sound and are requested as time sensitive. macOS shows a normal banner unless the app has Apple's Time Sensitive entitlement, which this ad-hoc build does not. Each unresolved failure notifies once, including failures already present at launch. Clicking a banner opens the `https://gitlab.com` page for that event.
+Banners are titled **Pipeline Tracer**. Failures play the default sound and are requested as time sensitive. macOS shows a normal banner unless the app has Apple's Time Sensitive entitlement, which this ad-hoc build does not. Each unresolved failure notifies once, including failures already present at launch. Clicking a banner opens the `https://gitlab.com` page for that event.
 
 Allow notifications the first time macOS asks, or from **Preferences** inside the panel. **Send test** posts one sample banner.
 
@@ -109,8 +109,8 @@ Clicking outside the panel closes it, including a click on the desktop. The menu
 
 ```bash
 cd menubar
-swift run GitLabTracer --self-check
-"./GitLab Tracer.app/Contents/MacOS/GitLabTracer" --preview
+swift run PipelineTracer --self-check
+"./Pipeline Tracer.app/Contents/MacOS/PipelineTracer" --preview
 ```
 
 `--self-check` covers status rules, dates, and notification text without calling GitLab. `--preview` opens sample data (`example/app`, `example/web`) and does not send notifications or merge anything. `--dump` prints a read-only summary of the live `glab` response. `--notification-preview` posts one sample banner after you allow notifications.

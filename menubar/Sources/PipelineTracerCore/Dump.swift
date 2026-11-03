@@ -1,6 +1,6 @@
 import Foundation
 
-/// `GitLabTracer --dump` prints the GitLab data as text, for checking without the menu bar.
+/// `PipelineTracer --dump` prints the GitLab data as text, for checking without the menu bar.
 public enum Dump {
     public static func run() {
         print("== Merge requests")
@@ -8,8 +8,8 @@ public enum Dump {
         for mr in mrs {
             print("  \(mr.project) !\(mr.iid) [\(mr.pipelineStatus ?? "no pipeline")] \(mr.isReady ? "ready" : mr.mergeStatus) — \(mr.title)")
         }
-        print("== Pipelines (\(GitLabTracerPrefs.pipelineHours)h)")
-        var pipes = GitLabModel.annotateSourceBranches(GitLabModel.fetchPipelines(hours: GitLabTracerPrefs.pipelineHours), openMRs: mrs)
+        print("== Pipelines (\(PipelineTracerPrefs.pipelineHours)h)")
+        var pipes = GitLabModel.annotateSourceBranches(GitLabModel.fetchPipelines(hours: PipelineTracerPrefs.pipelineHours), openMRs: mrs)
         for p in pipes {
             print("  \(p.project) #\(p.id) \(p.status) \(p.ref)")
         }
