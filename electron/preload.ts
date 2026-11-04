@@ -17,7 +17,8 @@ contextBridge.exposeInMainWorld("tracer", {
   close: (key: string, sha: string) => ipcRenderer.invoke("tracer:close", key, sha),
   openExternal: (url: string) => ipcRenderer.invoke("tracer:openExternal", url),
   openNotificationSettings: () => ipcRenderer.invoke("tracer:openNotificationSettings"),
-  testNotification: () => ipcRenderer.invoke("tracer:testNotification"),
+  testNotification: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke("tracer:testNotification"),
   copy: (text: string) => ipcRenderer.invoke("tracer:copy", text),
   fit: (width: number, height: number) => ipcRenderer.invoke("tracer:fit", width, height),
   hide: () => ipcRenderer.invoke("tracer:hide"),
