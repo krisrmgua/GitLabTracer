@@ -1,6 +1,19 @@
 import type { RingSlice, RingStatus } from "./logic";
 import { encodePng, over, rasterize, segmentDistance, type RGBA } from "./png";
 
+/**
+ * Brightness of the moving gleam at `local` (0..1 inside one job's slice).
+ * The gleam loops inside the orange fill and is zero past it.
+ */
+export function runningGleam(local: number, fill: number, phase: number): number {
+  if (!(fill > 0) || local < 0 || local > fill) return 0;
+  const pos = (phase - Math.floor(phase)) * fill;
+  let dist = Math.abs(local - pos);
+  if (dist > fill / 2) dist = fill - dist;
+  const sigma = Math.max(1e-6, fill * 0.18 * (fill * 0.18));
+  return Math.exp(-(dist * dist) / sigma);
+}
+
 const RING_COLORS: Record<RingStatus, [number, number, number]> = {
   passed: [52, 199, 89],
   running: [255, 149, 0],
@@ -61,9 +74,7 @@ export function trayIconPng(
       let bb = b;
       let alpha = filled ? 1 : trackAlpha;
       if (slice.kind === "running") {
-        let dist = Math.abs(local - gleamAt);
-        if (dist > 0.5) dist = 1 - dist;
-        const gleam = Math.exp(-(dist * dist) / 0.012);
+        const gleam = runningGleam(local, slice.fill, gleamAt);
         rr = rr + (255 - rr) * gleam;
         gg = gg + (255 - gg) * gleam;
         bb = bb + (255 - bb) * gleam;
