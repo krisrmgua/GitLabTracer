@@ -253,7 +253,7 @@ function wireIpc(): void {
     // macOS suppresses banners for the frontmost app — drop the panel first.
     if (panel && !panel.isDestroyed() && panel.isVisible()) {
       panel.hide();
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 400));
     }
     return notifier.preview();
   });
