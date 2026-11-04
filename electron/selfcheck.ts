@@ -38,7 +38,7 @@ import {
   type Job,
   type Pipeline,
 } from "./logic";
-import { appIconPng, trayIconPng } from "./icons";
+import { appIconPng, runningGleam, trayIconPng } from "./icons";
 import { merge } from "./model";
 
 const checks: Array<[string, () => void | Promise<void>]> = [];
@@ -83,6 +83,20 @@ check("a running job owns the slice that gleams", () => {
   assert.equal(slices[0].fill, 1);
   assert.ok(slices[1].fill > 0 && slices[1].fill < 1);
   assert.equal(slices[2].fill, 0);
+});
+
+check("the running gleam stays inside the orange fill", () => {
+  const fill = 0.2;
+  for (let phase = 0; phase < 1; phase += 0.05) {
+    assert.equal(runningGleam(fill + 0.02, fill, phase), 0);
+    assert.equal(runningGleam(0.9, fill, phase), 0);
+    let brightest = 0;
+    for (let local = 0; local <= fill; local += fill / 20) {
+      brightest = Math.max(brightest, runningGleam(local, fill, phase));
+    }
+    assert.ok(brightest > 0.9);
+  }
+  assert.equal(runningGleam(0.05, 0, 0.2), 0);
 });
 
 check("canceled and skipped stay themselves", () => {
