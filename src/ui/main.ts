@@ -342,10 +342,12 @@ function ring(p: Pipeline): string {
           ? `<circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-width="3" stroke-linecap="butt" stroke-dasharray="${solid.toFixed(2)} ${circ.toFixed(2)}" stroke-dashoffset="${start.toFixed(2)}"/>`
           : "";
       if (slice.kind !== "running") return body;
-      const shine = Math.max(2.2, Math.min(sliceLen * 0.42, 7));
+      // Stay inside the orange. A longer dash, or a round cap, draws past the fill.
+      const shine = Math.min(solid * 0.42, 7);
+      if (shine < 0.8) return body;
       const from = start;
-      const to = start - Math.max(0, sliceLen - shine);
-      return `${body}<circle class="ring-shine" cx="13" cy="13" r="${r}" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-dasharray="${shine.toFixed(2)} ${circ.toFixed(2)}" style="--shine-from:${from.toFixed(2)}px;--shine-to:${to.toFixed(2)}px;animation-delay:-${phase.toFixed(3)}s"/>`;
+      const to = start - Math.max(0, solid - shine);
+      return `${body}<circle class="ring-shine" cx="13" cy="13" r="${r}" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="butt" stroke-dasharray="${shine.toFixed(2)} ${circ.toFixed(2)}" style="--shine-from:${from.toFixed(2)}px;--shine-to:${to.toFixed(2)}px;animation-delay:-${phase.toFixed(3)}s"/>`;
     })
     .join("");
   const label = p.jobs.length
