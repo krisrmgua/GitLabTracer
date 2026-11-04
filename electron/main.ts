@@ -170,8 +170,8 @@ function updateTray(): void {
 }
 
 function applyLoginItem(prefs: Prefs): void {
-  // macOS login start is the LaunchAgent install.sh writes, so the label stays com.kris.pipelinetracer.
-  if (process.platform !== "win32" || !app.isPackaged) return;
+  if (!app.isPackaged) return;
+  if (process.platform !== "darwin" && process.platform !== "win32") return;
   app.setLoginItemSettings({ openAtLogin: prefs.startAtLogin });
 }
 
