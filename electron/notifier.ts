@@ -1,9 +1,13 @@
 import { app, nativeImage, Notification, shell, type NativeImage } from "electron";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { appIconPng } from "./icons";
 import { browserURL, notificationContent, type NotificationKind } from "./logic";
+
+const execFileAsync = promisify(execFile);
 
 // Keeps a reference so a clicked banner can still reach its handler after GC would collect it.
 const live = new Set<Notification>();
@@ -12,7 +16,7 @@ let cachedIcon: NativeImage | null = null;
 let cachedIconPath: string | null = null;
 
 export function notificationsSupported(): boolean {
-  return Notification.isSupported();
+  return Notification.isSupported() || process.platform === "darwin";
 }
 
 /** App mark for banners. Prefer the packaged icns/png; fall back to a generated PNG. */
@@ -24,6 +28,7 @@ function notificationIcon(): { image: NativeImage; path: string | null } {
   const candidates = [
     path.join(process.resourcesPath, "icon.icns"),
     path.join(process.resourcesPath, "icon.png"),
+    path.join(process.resourcesPath, "NotificationPreview.app", "Contents", "Resources", "PipelineTracer.icns"),
     path.join(app.getAppPath(), "assets", "icon.png"),
   ];
   for (const file of candidates) {
@@ -52,6 +57,66 @@ function notificationIcon(): { image: NativeImage; path: string | null } {
   }
 
   return { image: cachedIcon, path: cachedIconPath };
+}
+
+/** Swift helper that posts via UNUserNotificationCenter (reliable banners + app icon). */
+function swiftPreviewBinary(): string | null {
+  const candidates = [
+    path.join(process.resourcesPath, "NotificationPreview.app", "Contents", "MacOS", "PipelineTracer"),
+    path.join(app.getAppPath(), "menubar", "Pipeline Tracer.app", "Contents", "MacOS", "PipelineTracer"),
+    path.join(process.cwd(), "menubar", "Pipeline Tracer.app", "Contents", "MacOS", "PipelineTracer"),
+  ];
+  return candidates.find((file) => fs.existsSync(file)) ?? null;
+}
+
+async function sendViaSwiftPreview(): Promise<PreviewResult | null> {
+  if (process.platform !== "darwin") return null;
+  const bin = swiftPreviewBinary();
+  if (!bin) return null;
+  try {
+    const { stdout, stderr } = await execFileAsync(bin, ["--notification-preview"], {
+      timeout: 12_000,
+      encoding: "utf8",
+    });
+    if (/Enable Pipeline Tracer notifications/i.test(stderr || "")) {
+      return {
+        ok: false,
+        message:
+          "Enable Pipeline Tracer in System Settings → Notifications, then try again.",
+      };
+    }
+    if ((stdout || "").includes("queued") || (stdout || "").includes("preview")) {
+      return { ok: true, message: "Test notification sent." };
+    }
+    return { ok: true, message: "Test notification sent." };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/Enable Pipeline Tracer notifications/i.test(msg) || /exit code 2/i.test(msg)) {
+      return {
+        ok: false,
+        message:
+          "Enable Pipeline Tracer in System Settings → Notifications, then try again.",
+      };
+    }
+    return null;
+  }
+}
+
+async function sendViaOsascript(body: string): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+  try {
+    await execFileAsync(
+      "osascript",
+      [
+        "-e",
+        `display notification ${JSON.stringify(body)} with title "Pipeline Tracer" subtitle "Notification preview"`,
+      ],
+      { timeout: 5000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -100,59 +165,54 @@ export interface PreviewResult {
 
 /**
  * Send-test path. Caller should hide the panel first on macOS — the OS suppresses
- * banners for the frontmost app.
+ * banners for the frontmost app. Prefers the Swift UNUserNotificationCenter helper
+ * (same icon as the app), then Electron, then osascript.
  */
 export async function preview(): Promise<PreviewResult> {
-  if (!Notification.isSupported()) {
-    return {
-      ok: false,
-      message: "Notifications are not supported on this system.",
-    };
-  }
+  const viaSwift = await sendViaSwiftPreview();
+  if (viaSwift) return viaSwift;
 
-  const content = notificationContent(
-    "Preview · Merge complete",
-    "example/project · !347",
-    "Fix calendar cell count for the current month",
-    "pipeline-tracer-preview",
-    false,
-    "https://gitlab.com",
-    "mergeRequest",
-  );
-  const isMac = process.platform === "darwin";
-  const { image, path: iconPath } = notificationIcon();
-  const n = new Notification({
-    title: content.title,
-    subtitle: isMac ? content.subtitle : undefined,
-    body: isMac ? content.body : `${content.subtitle}\n${content.body}`,
-    silent: true,
-    icon: iconPath ?? image,
-  });
-  live.add(n);
+  if (Notification.isSupported()) {
+    const content = notificationContent(
+      "Preview · Merge complete",
+      "example/project · !347",
+      "Fix calendar cell count for the current month",
+      "pipeline-tracer-preview",
+      false,
+      "https://gitlab.com",
+      "mergeRequest",
+    );
+    const isMac = process.platform === "darwin";
+    const { image, path: iconPath } = notificationIcon();
+    const n = new Notification({
+      title: content.title,
+      subtitle: isMac ? content.subtitle : undefined,
+      body: isMac ? content.body : `${content.subtitle}\n${content.body}`,
+      silent: false,
+      icon: iconPath ?? image,
+    });
+    live.add(n);
 
-  const shown = await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const done = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-    n.once("show", () => done(true));
-    n.once("failed", () => done(false));
-    n.once("close", () => {
-      // Some platforms fire close without show when delivery is blocked.
-      setTimeout(() => done(false), 0);
+    let failed = false;
+    n.once("failed", () => {
+      failed = true;
     });
     n.show();
-    setTimeout(() => done(false), 1500);
-  });
+    // macOS often never fires "show"; treat as delivered unless "failed" arrives.
+    await new Promise((r) => setTimeout(r, 600));
+    setTimeout(() => live.delete(n), 8000);
 
-  // Keep the ref briefly so the banner can paint, then drop it with the rest.
-  setTimeout(() => live.delete(n), 8000);
+    if (!failed) {
+      return { ok: true, message: "Test notification sent." };
+    }
+  }
 
-  if (shown) {
+  const body =
+    "example/project · !347 · Fix calendar cell count for the current month";
+  if (await sendViaOsascript(body)) {
     return { ok: true, message: "Test notification sent." };
   }
+
   return {
     ok: false,
     message:

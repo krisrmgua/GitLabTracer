@@ -1,7 +1,7 @@
 {
   "name": "pipeline-tracer",
   "productName": "Pipeline Tracer",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Tray app for your GitLab and GitHub pipelines, merge requests, and pull requests, for macOS and Windows",
   "main": "dist-electron/main.js",
   "author": "Kristopher Simmons",
@@ -17,12 +17,13 @@
     "icons": "node scripts/make-icon.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json",
     "check": "npm run build:electron && node dist-electron/selfcheck.js",
+    "build:notify-helper": "bash menubar/make-app.sh",
     "build": "npm run typecheck && npm run build:ui && npm run build:electron && npm run icons",
     "start": "npm run build && electron .",
     "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && PIPELINE_TRACER_DEV=1 electron .\"",
-    "pack:mac": "npm run build && electron-builder --mac",
+    "pack:mac": "npm run build && npm run build:notify-helper && electron-builder --mac",
     "pack:win": "npm run build && electron-builder --win",
-    "pack": "npm run build && electron-builder --mac --win"
+    "pack": "npm run build && npm run build:notify-helper && electron-builder --mac --win"
   },
   "build": {
     "appId": "com.kris.pipelinetracer",
@@ -44,7 +45,16 @@
       "icon": "assets/icon.png",
       "extendInfo": {
         "LSUIElement": true
-      }
+      },
+      "extraResources": [
+        {
+          "from": "menubar/Pipeline Tracer.app",
+          "to": "NotificationPreview.app",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
     "win": {
       "target": [
