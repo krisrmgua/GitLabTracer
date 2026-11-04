@@ -85,15 +85,16 @@ export async function trayCapsulePng(
   const ring = await loadImage(ringPng);
   ctx.drawImage(ring, RING_X, PAD_Y, RING_SIZE, RING_SIZE);
 
-  // Counters + dividers. Center with glyph bounds — "middle" baseline sits optically high on SF.
+  // Counters + dividers. Center on glyph ink (not font line box). Use ?? so
+  // descent 0 for caps like "MR 2" is kept — || treated 0 as missing and sat high.
   let x = RING_X + RING_SIZE + 6;
   ctx.textBaseline = "alphabetic";
   ctx.font = FONT;
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     const m = ctx.measureText(part.text);
-    const ascent = m.actualBoundingBoxAscent || 9;
-    const descent = m.actualBoundingBoxDescent || 3;
+    const ascent = m.actualBoundingBoxAscent ?? 9;
+    const descent = m.actualBoundingBoxDescent ?? 3;
     const textY = (HEIGHT - (ascent + descent)) / 2 + ascent;
     ctx.fillStyle = part.color;
     ctx.fillText(part.text, x, textY);
