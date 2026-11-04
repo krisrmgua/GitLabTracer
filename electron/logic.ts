@@ -717,7 +717,7 @@ export interface Prefs {
   mergeButton: boolean;
   /** Off returns the panel to the overview each time it opens. */
   rememberPlace: boolean;
-  /** Windows only. macOS login start is the LaunchAgent from install.sh. */
+  /** Opens the app when you sign in (macOS login item / Windows Startup). */
   startAtLogin: boolean;
 }
 

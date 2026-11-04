@@ -574,7 +574,6 @@ function cliRow(name: string, path: string | null): string {
 
 function renderSettings(s: TracerState): string {
   const p = s.prefs;
-  const windows = s.platform === "win32";
   const mac = s.platform === "darwin";
   const supported = s.notificationsSupported;
   const banner = mac
@@ -589,13 +588,8 @@ function renderSettings(s: TracerState): string {
       choice("pipelineHours", "Completion history", PIPELINE_HOUR_CHOICES, p.pipelineHours, "hours"),
       toggle("mergeButton", "Show merge actions", p.mergeButton),
     ])}
-    ${
-      windows
-        ? `<div class="section-label">Startup</div>${panel([toggle("startAtLogin", "Start at login", p.startAtLogin)])}`
-        : mac
-          ? '<div class="tiny">Login start on macOS is the LaunchAgent that scripts/install.sh writes.</div>'
-          : ""
-    }
+    <div class="section-label">Startup</div>
+    ${panel([toggle("startAtLogin", "Open at login", p.startAtLogin)])}
     <div class="section-label">Notifications</div>
     ${panel([
       `<div class="stack" style="padding:10px">

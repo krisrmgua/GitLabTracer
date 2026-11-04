@@ -65,7 +65,7 @@ You can also install by hand: the [GitHub CLI MSI](https://github.com/cli/cli/re
 
 ### Where the app looks for them
 
-Apps started from Finder, the login LaunchAgent, or the Start menu often get a short `PATH`. Pipeline Tracer searches:
+Apps started from Finder, as a login item, or from the Start menu often get a short `PATH`. Pipeline Tracer searches:
 
 - its own `PATH`, plus your login shell's `PATH` on macOS, or your current user and machine `PATH` from the registry on Windows (so a fresh install works without signing out)
 - macOS: `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `~/.local/bin`, `~/bin`
@@ -123,15 +123,15 @@ cd GitLabTracer
 
 1. runs `npm install` and `npm run pack:mac` (electron-builder writes `release/mac-*/Pipeline Tracer.app`)
 2. stops any running copy, including the old Swift build
-3. copies the app to `~/Applications/Pipeline Tracer.app`
-4. writes the LaunchAgent `~/Library/LaunchAgents/com.kris.pipelinetracer.plist` and starts it, so the app also opens at login
+3. removes a leftover Swift/older Electron LaunchAgent if present
+4. copies the app to `~/Applications/Pipeline Tracer.app` and opens it
 5. writes a helper, `~/bin/pipeline-tracer start|stop|status` (put `~/bin` on your `PATH` to use it)
 
 Run it again to update. The bundle id is `com.kris.pipelinetracer`.
 
 The build is ad-hoc and not notarized. The script clears the quarantine flag on the copy it installs. If macOS still blocks it, right-click the app in `~/Applications` → **Open** → **Open**.
 
-To stop login start, run `launchctl bootout gui/$(id -u)/com.kris.pipelinetracer` and delete the plist.
+Login start is **Preferences → Open at login** (Electron login item, default on). Turn it off there.
 
 ## Install the app on Windows
 
@@ -153,7 +153,7 @@ If PowerShell blocks the script, run `Set-ExecutionPolicy -Scope CurrentUser Rem
 
 The installer is not code-signed, so SmartScreen may say "Windows protected your PC". Choose **More info → Run anyway** if you built it yourself.
 
-Windows often hides new tray icons. Click the **^** overflow arrow by the clock and drag Pipeline Tracer onto the taskbar. The app turns on start at login the first time it runs. Change it under **Preferences → Start at login**.
+Windows often hides new tray icons. Click the **^** overflow arrow by the clock and drag Pipeline Tracer onto the taskbar. The app turns on open at login the first time it runs. Change it under **Preferences → Open at login**.
 
 Uninstall from **Settings → Apps → Pipeline Tracer**. Settings in `%APPDATA%\Pipeline Tracer` stay until you delete that folder.
 
@@ -212,7 +212,7 @@ The bell in the panel lists this session's events, filtered by **All**, **Pipeli
 | Refresh interval | 60 seconds. Choices: 10, 20, 30, 40, 50, 60. |
 | Completion history | 2 hours. Choices: 1, 2, 4, 6, 8, 12, 24. Covers GitLab pipelines and GitHub Actions runs. Open requests are not cut off by it. |
 | Show merge actions | On. Covers GitLab merge requests and GitHub pull requests. |
-| Start at login (Windows only) | On. macOS uses the LaunchAgent from `install.sh`. |
+| Open at login | On. macOS and Windows both use the Electron login item. |
 
 Preferences are saved in `pipelinetracer.json` in the app data folder:
 
@@ -280,7 +280,7 @@ swift run PipelineTracer --self-check
 ./install.sh
 ```
 
-Both apps install to `~/Applications/Pipeline Tracer.app` with the same bundle id and LaunchAgent label, so whichever installer ran last wins. The Electron app does not read the Swift app's UserDefaults, so set your preferences again after switching.
+Both apps install to `~/Applications/Pipeline Tracer.app` with the same bundle id, so whichever installer ran last wins. The Electron installer removes the old LaunchAgent and uses **Open at login** instead. The Electron app does not read the Swift app's UserDefaults, so set your preferences again after switching.
 
 ## Version
 
