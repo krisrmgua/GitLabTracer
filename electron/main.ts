@@ -19,6 +19,7 @@ import * as model from "./model";
 import * as notifier from "./notifier";
 import { discoverPath } from "./shell";
 import { Store } from "./store";
+import { trayCapsulePng } from "./trayCapsule";
 
 const APP_ID = "com.kris.pipelinetracer";
 const isDev = process.env.PIPELINE_TRACER_DEV === "1";
@@ -120,41 +121,54 @@ function togglePanel(): void {
 }
 
 function broadcast(): void {
-  updateTray();
+  void updateTray();
   panel?.webContents.send("tracer:state", controller.snapshot());
 }
 
-function trayImage(failing: boolean): Electron.NativeImage {
+/** Swift MenuBarCapsule on Mac; bare ring on Windows (taskbar icon slot is square). */
+async function trayImage(
+  requests: number,
+  running: number,
+  failed: number,
+): Promise<Electron.NativeImage> {
   const [status, progress] = progressState(controller.cardPipeline);
-  // Rendered at 2x and marked as such, so the menu bar and HiDPI trays stay sharp.
-  const size = isMac ? 18 : 16;
+  if (isMac) {
+    const { png, width, height } = await trayCapsulePng(status, progress, false, {
+      mergeRequests: requests,
+      running,
+      failed,
+    });
+    return nativeImage.createFromBuffer(png, { scaleFactor: 2, width, height });
+  }
+  const size = 16;
+  const failing = failed > 0;
   const image = nativeImage.createEmpty();
-  image.addRepresentation({ scaleFactor: 1, width: size, height: size, buffer: trayIconPng(status, progress, failing, size) });
-  image.addRepresentation({ scaleFactor: 2, width: size * 2, height: size * 2, buffer: trayIconPng(status, progress, failing, size * 2) });
+  image.addRepresentation({
+    scaleFactor: 1,
+    width: size,
+    height: size,
+    buffer: trayIconPng(status, progress, failing, size),
+  });
+  image.addRepresentation({
+    scaleFactor: 2,
+    width: size * 2,
+    height: size * 2,
+    buffer: trayIconPng(status, progress, failing, size * 2),
+  });
   return image;
 }
 
-/** Menu bar text: open requests, running and failed pipelines. Fail is red and bold. */
-function trayTitle(requests: number, running: number, failed: number): string {
-  const reset = "\u001b[0m";
-  const parts: string[] = [];
-  if (requests > 0) parts.push(`MR ${requests}`);
-  if (running > 0) parts.push(`\u001b[36mRun ${running}${reset}`);
-  if (failed > 0) parts.push(`\u001b[1;31mFail ${failed}${reset}`);
-  return parts.join(" │ ");
-}
-
-function updateTray(): void {
+async function updateTray(): Promise<void> {
   if (!tray || !controller) return;
   const { requests, running, failed } = trayCounts(controller.pipelines, controller.mrs);
   const [status, progress] = progressState(controller.cardPipeline);
-  const failing = failed > 0;
-  const key = `${status}|${progress.toFixed(2)}|${failing}`;
+  const key = `${status}|${progress.toFixed(2)}|${requests}|${running}|${failed}`;
   if (key !== lastTrayKey) {
     lastTrayKey = key;
-    tray.setImage(trayImage(failing));
+    tray.setImage(await trayImage(requests, running, failed));
   }
-  if (isMac) tray.setTitle(trayTitle(requests, running, failed), { fontType: "monospacedDigit" });
+  // Counters live inside the capsule image on Mac (Swift parity). Clear any title.
+  if (isMac) tray.setTitle("");
 
   const lines = [`Pipeline Tracer: ${requests} requests · ${running} running · ${failed} failed`];
   const p = controller.cardPipeline;
@@ -278,9 +292,9 @@ async function boot(): Promise<void> {
   controller = new Controller(store, broadcast);
   applyLoginItem(store.prefs);
 
-  tray = new Tray(trayImage(false));
+  tray = new Tray(await trayImage(0, 0, 0));
   tray.setToolTip("Pipeline Tracer");
-  if (isMac) tray.setTitle("Pipeline Tracer");
+  if (isMac) tray.setTitle("");
   tray.on("click", () => togglePanel());
   tray.on("right-click", () => {
     const menu = Menu.buildFromTemplate([
