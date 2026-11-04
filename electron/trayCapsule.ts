@@ -85,14 +85,18 @@ export async function trayCapsulePng(
   const ring = await loadImage(ringPng);
   ctx.drawImage(ring, RING_X, PAD_Y, RING_SIZE, RING_SIZE);
 
-  // Counters + dividers.
+  // Counters + dividers. Center with glyph bounds — "middle" baseline sits optically high on SF.
   let x = RING_X + RING_SIZE + 6;
-  ctx.textBaseline = "middle";
+  ctx.textBaseline = "alphabetic";
   ctx.font = FONT;
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
+    const m = ctx.measureText(part.text);
+    const ascent = m.actualBoundingBoxAscent || 9;
+    const descent = m.actualBoundingBoxDescent || 3;
+    const textY = (HEIGHT - (ascent + descent)) / 2 + ascent;
     ctx.fillStyle = part.color;
-    ctx.fillText(part.text, x, HEIGHT / 2);
+    ctx.fillText(part.text, x, textY);
     x += textWidths[i];
     if (i < parts.length - 1) {
       x += 8;
