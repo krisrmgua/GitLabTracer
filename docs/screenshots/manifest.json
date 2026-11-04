@@ -1,0 +1,122 @@
+[
+  {
+    "file": "menu-bar.png",
+    "caption": "Actual menu-bar renderer with synthetic values, arranged on a presentation backdrop.",
+    "size": {
+      "width": 800,
+      "height": 394
+    }
+  },
+  {
+    "file": "overview.png",
+    "caption": "Activity inbox with failures, simultaneous pipelines, and requests in different states.",
+    "size": {
+      "width": 860,
+      "height": 1078
+    }
+  },
+  {
+    "file": "running-pipeline.png",
+    "caption": "Running pipeline with completed, running, and queued jobs.",
+    "size": {
+      "width": 860,
+      "height": 792
+    }
+  },
+  {
+    "file": "pipeline.png",
+    "caption": "Pipeline detail with per-stage progress and job durations.",
+    "size": {
+      "width": 860,
+      "height": 792
+    }
+  },
+  {
+    "file": "job-logs.png",
+    "caption": "Failed-job trace in the actual log viewer.",
+    "size": {
+      "width": 860,
+      "height": 1072
+    }
+  },
+  {
+    "file": "job-summary.png",
+    "caption": "Job summary and the link to the CI host.",
+    "size": {
+      "width": 860,
+      "height": 754
+    }
+  },
+  {
+    "file": "merge-request.png",
+    "caption": "Ready merge request workspace, checks, source/target, and actions.",
+    "size": {
+      "width": 1240,
+      "height": 1080
+    }
+  },
+  {
+    "file": "merge-confirmation.png",
+    "caption": "Merge confirmation before the host is rechecked.",
+    "size": {
+      "width": 1240,
+      "height": 1080
+    }
+  },
+  {
+    "file": "close-confirmation.png",
+    "caption": "Separate close-request confirmation.",
+    "size": {
+      "width": 1240,
+      "height": 1080
+    }
+  },
+  {
+    "file": "running-request.png",
+    "caption": "Request with running checks and disabled merge action.",
+    "size": {
+      "width": 1240,
+      "height": 1080
+    }
+  },
+  {
+    "file": "draft-request.png",
+    "caption": "Draft request workspace keeps merge disabled.",
+    "size": {
+      "width": 1240,
+      "height": 1080
+    }
+  },
+  {
+    "file": "history.png",
+    "caption": "Recent successes and their expandable job lists.",
+    "size": {
+      "width": 860,
+      "height": 440
+    }
+  },
+  {
+    "file": "success-jobs.png",
+    "caption": "Expanded successful run with individual job results.",
+    "size": {
+      "width": 860,
+      "height": 672
+    }
+  },
+  {
+    "file": "notifications.png",
+    "caption": "Notification inbox with status filters.",
+    "size": {
+      "width": 860,
+      "height": 856
+    }
+  },
+  {
+    "file": "settings.png",
+    "caption": "Preferences, notifications, startup, refresh cadence, and tool status.",
+    "size": {
+      "width": 860,
+      "height": 1382
+    }
+  }
+]
