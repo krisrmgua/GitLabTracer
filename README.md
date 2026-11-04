@@ -13,6 +13,56 @@ Pipeline Tracer reads data through two command-line tools you sign in to yoursel
 
 You only need one of them. If one host isn't signed in, its sections stay empty until you log in.
 
+
+## Screenshots
+
+Screenshots of the current Electron interface on macOS, using fictional projects, accounts, jobs, and values. No personal data or live credentials are used.
+
+<a href="docs/screenshots/overview.png"><img src="docs/screenshots/overview.png" alt="PipelineTracer main view with sample data" width="460" /></a>
+
+The gallery includes detail views, settings, and available actions. Click an image for the full-resolution capture.
+
+<details>
+<summary>View all 15 screenshots</summary>
+
+| Menu Bar | Overview |
+| --- | --- |
+| <a href="docs/screenshots/menu-bar.png"><img src="docs/screenshots/menu-bar.png" alt="Actual menu-bar renderer with synthetic values, arranged on a presentation backdrop." width="360" /></a><br>Actual menu-bar renderer with synthetic values, arranged on a presentation backdrop. | <a href="docs/screenshots/overview.png"><img src="docs/screenshots/overview.png" alt="Activity inbox with failures, simultaneous pipelines, and requests in different states." width="360" /></a><br>Activity inbox with failures, simultaneous pipelines, and requests in different states. |
+
+| Running Pipeline | Pipeline |
+| --- | --- |
+| <a href="docs/screenshots/running-pipeline.png"><img src="docs/screenshots/running-pipeline.png" alt="Running pipeline with completed, running, and queued jobs." width="360" /></a><br>Running pipeline with completed, running, and queued jobs. | <a href="docs/screenshots/pipeline.png"><img src="docs/screenshots/pipeline.png" alt="Pipeline detail with per-stage progress and job durations." width="360" /></a><br>Pipeline detail with per-stage progress and job durations. |
+
+| Job Logs | Job Summary |
+| --- | --- |
+| <a href="docs/screenshots/job-logs.png"><img src="docs/screenshots/job-logs.png" alt="Failed-job trace in the actual log viewer." width="360" /></a><br>Failed-job trace in the actual log viewer. | <a href="docs/screenshots/job-summary.png"><img src="docs/screenshots/job-summary.png" alt="Job summary and the link to the CI host." width="360" /></a><br>Job summary and the link to the CI host. |
+
+| Merge Request | Merge Confirmation |
+| --- | --- |
+| <a href="docs/screenshots/merge-request.png"><img src="docs/screenshots/merge-request.png" alt="Ready merge request workspace, checks, source/target, and actions." width="360" /></a><br>Ready merge request workspace, checks, source/target, and actions. | <a href="docs/screenshots/merge-confirmation.png"><img src="docs/screenshots/merge-confirmation.png" alt="Merge confirmation before the host is rechecked." width="360" /></a><br>Merge confirmation before the host is rechecked. |
+
+| Close Confirmation | Running Request |
+| --- | --- |
+| <a href="docs/screenshots/close-confirmation.png"><img src="docs/screenshots/close-confirmation.png" alt="Separate close-request confirmation." width="360" /></a><br>Separate close-request confirmation. | <a href="docs/screenshots/running-request.png"><img src="docs/screenshots/running-request.png" alt="Request with running checks and disabled merge action." width="360" /></a><br>Request with running checks and disabled merge action. |
+
+| Draft Request | History |
+| --- | --- |
+| <a href="docs/screenshots/draft-request.png"><img src="docs/screenshots/draft-request.png" alt="Draft request workspace keeps merge disabled." width="360" /></a><br>Draft request workspace keeps merge disabled. | <a href="docs/screenshots/history.png"><img src="docs/screenshots/history.png" alt="Recent successes and their expandable job lists." width="360" /></a><br>Recent successes and their expandable job lists. |
+
+| Success Jobs | Notifications |
+| --- | --- |
+| <a href="docs/screenshots/success-jobs.png"><img src="docs/screenshots/success-jobs.png" alt="Expanded successful run with individual job results." width="360" /></a><br>Expanded successful run with individual job results. | <a href="docs/screenshots/notifications.png"><img src="docs/screenshots/notifications.png" alt="Notification inbox with status filters." width="360" /></a><br>Notification inbox with status filters. |
+
+| Settings |  |
+| --- | --- |
+| <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Preferences, notifications, startup, refresh cadence, and tool status." width="360" /></a><br>Preferences, notifications, startup, refresh cadence, and tool status. |  |
+
+</details>
+
+The menu-bar sheet uses the app’s actual drawing code with sample values, arranged on a neutral backdrop. It is not a capture of a personal desktop.
+
+[How these screenshots are made](docs/screenshots/README.md)
+
 ---
 
 ## Requirements
