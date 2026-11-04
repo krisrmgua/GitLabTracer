@@ -10,6 +10,7 @@ import {
   isFailed,
   isReady,
   isRunning,
+  settlePipeline,
   isSuccess,
   mergeRequestIID,
   mrKey,
@@ -17,6 +18,8 @@ import {
   mrTone,
   numberLabel,
   pipelineKey,
+  progressState,
+  ringSlices,
   refLabel,
   relative,
   serviceName,
@@ -322,18 +325,34 @@ function openButton(url: string, label: string): string {
 function ring(p: Pipeline): string {
   const c = tone(p.status);
   const done = completed(p.jobs);
-  const progress = p.jobs.length ? done / p.jobs.length : isSuccess(p) ? 1 : 0;
+  const slices = ringSlices(p.jobs);
   const r = 11.5;
   const circ = 2 * Math.PI * r;
-  const arc =
-    progress > 0
-      ? `<circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(circ * progress).toFixed(2)} ${circ.toFixed(2)}"/>`
-      : "";
+  const n = slices.length;
+  const gap = n > 1 ? circ * 0.035 : 0;
+  const sliceLen = n > 0 ? circ / n - gap : 0;
+  const phase = ((Date.now() % 1100) / 1100) * 1.1;
+  const arcs = slices
+    .map((slice, i) => {
+      if (slice.kind === "wait" || sliceLen <= 0) return "";
+      const start = -(i * circ) / n;
+      const solid = slice.kind === "done" ? sliceLen : sliceLen * slice.fill;
+      const body =
+        solid > 0.4
+          ? `<circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-width="3" stroke-linecap="butt" stroke-dasharray="${solid.toFixed(2)} ${circ.toFixed(2)}" stroke-dashoffset="${start.toFixed(2)}"/>`
+          : "";
+      if (slice.kind !== "running") return body;
+      const shine = Math.max(2.2, Math.min(sliceLen * 0.42, 7));
+      const from = start;
+      const to = start - Math.max(0, sliceLen - shine);
+      return `${body}<circle class="ring-shine" cx="13" cy="13" r="${r}" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-dasharray="${shine.toFixed(2)} ${circ.toFixed(2)}" style="--shine-from:${from.toFixed(2)}px;--shine-to:${to.toFixed(2)}px;animation-delay:-${phase.toFixed(3)}s"/>`;
+    })
+    .join("");
   const label = p.jobs.length
     ? `<span class="label" style="color:${c}">${done}/${p.jobs.length}</span>`
     : tinted(statusIcon(p.status), c, 10);
   const aria = p.jobs.length ? `${p.status}, ${done} of ${p.jobs.length} jobs finished` : `${p.status}, job details not loaded`;
-  return `<span class="ring" role="img" aria-label="${esc(aria)}"><svg class="r" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-opacity="0.22" stroke-width="3"/>${arc}</svg>${label}</span>`;
+  return `<span class="ring" role="img" aria-label="${esc(aria)}"><svg class="r" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="${r}" fill="none" style="stroke:${c}" stroke-opacity="0.22" stroke-width="3"/>${arcs}</svg>${label}</span>`;
 }
 
 function jobRow(j: Job, key: string, small = false): string {
@@ -706,13 +725,14 @@ function renderLog(p: Pipeline, job: Job): string {
 function renderPipeline(p: Pipeline): string {
   const key = pipelineKey(p);
   const service = serviceName(p);
+  const shown = settlePipeline({ ...p, jobs: ui.jobs.length ? ui.jobs : p.jobs });
   const parts = [
     `<div class="detail-head">
       <div class="main">
         <span class="t">#${p.id}&ensp;${esc(p.project)}</span>
         <span class="s">${esc(`${refLabel(p)} · ${relative(p.updated)}`)}</span>
       </div>
-      ${badge(statusTitle(p.status), p.status)}
+      ${badge(statusTitle(shown.status), shown.status)}
       ${openButton(p.url, `Open pipeline on ${service}`)}
     </div>`,
   ];
@@ -1005,6 +1025,20 @@ function render(): void {
 
   renderOverlay();
   requestFit();
+  armRingTick();
+}
+
+let ringTimer = 0;
+
+/** Redraw while a job is running so a single job can fill the ring before it finishes. */
+function armRingTick(): void {
+  window.clearTimeout(ringTimer);
+  const jobs = [
+    ...(state?.pipelines.flatMap((p) => p.jobs) ?? []),
+    ...ui.jobs,
+  ];
+  if (!jobs.some((j) => j.status === "running")) return;
+  ringTimer = window.setTimeout(() => render(), 1000);
 }
 
 let fitFrame = 0;

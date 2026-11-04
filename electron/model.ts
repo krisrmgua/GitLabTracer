@@ -4,6 +4,7 @@ import {
   jsonInt,
   makeMergeRequest,
   mergeRequestIID,
+  mergeStatusIsProvisional,
   isRunning,
   parseDate,
   parseGitHubJob,
@@ -70,7 +71,8 @@ export async function fetchOpenMergeRequests(onFailure: () => void): Promise<Mer
   const data = await glabGraphQL(query);
   const nodes = arr(obj(obj(data?.currentUser)?.authoredMergeRequests)?.nodes);
   if (!nodes) return fetchOpenMergeRequestsREST(onFailure);
-  return nodes.map(parseMergeRequestGraphQL).filter((m): m is MergeRequest => m != null);
+  const mrs = nodes.map(parseMergeRequestGraphQL).filter((m): m is MergeRequest => m != null);
+  return Promise.all(mrs.map(recheckGitLabMergeStatus));
 }
 
 async function fetchOpenMergeRequestsREST(onFailure: () => void): Promise<MergeRequest[]> {
@@ -81,7 +83,32 @@ async function fetchOpenMergeRequestsREST(onFailure: () => void): Promise<MergeR
   }
   const mrs = list.map(parseMergeRequest).filter((m): m is MergeRequest => m != null);
   const archived = await archivedProjects(new Set(mrs.map((m) => m.projectID)));
-  return mrs.filter((m) => !archived.has(m.projectID));
+  return Promise.all(mrs.filter((m) => !archived.has(m.projectID)).map(recheckGitLabMergeStatus));
+}
+
+/**
+ * The open-list query stays on "checking" or "unchecked" until one MR read
+ * asks GitLab to finish, and that result often arrives a few seconds later.
+ */
+async function recheckGitLabMergeStatus(mr: MergeRequest): Promise<MergeRequest> {
+  if (!mergeStatusIsProvisional(mr.mergeStatus)) return mr;
+  const read = async (recheck: boolean): Promise<MergeRequest | null> => {
+    const detail = obj(
+      await glabJSON(
+        `projects/${mr.projectID}/merge_requests/${mr.iid}`,
+        "GET",
+        recheck ? { with_merge_status_recheck: "true" } : undefined,
+      ),
+    );
+    return detail ? parseMergeRequest(detail) : null;
+  };
+  let latest: MergeRequest | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    latest = (await read(attempt === 0)) ?? latest;
+    if (latest && !mergeStatusIsProvisional(latest.mergeStatus)) return latest;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1500 : 2000));
+  }
+  return latest ?? mr;
 }
 
 async function archivedProjects(ids: Set<number>): Promise<Set<number>> {
@@ -248,7 +275,23 @@ export async function fetchOpenPullRequests(): Promise<MergeRequest[] | null> {
   const data = await ghGraphQL(query);
   const nodes = arr(obj(obj(data?.viewer)?.pullRequests)?.nodes);
   if (!nodes) return null;
-  return nodes.map(parseGitHubPull).filter((m): m is MergeRequest => m != null);
+  const pulls = nodes.map(parseGitHubPull).filter((m): m is MergeRequest => m != null);
+  return Promise.all(pulls.map(recheckGitHubMergeStatus));
+}
+
+/** GitHub often returns mergeable=null until a second read of the same pull. */
+async function recheckGitHubMergeStatus(mr: MergeRequest): Promise<MergeRequest> {
+  if (!mergeStatusIsProvisional(mr.mergeStatus)) return mr;
+  const once = async (): Promise<MergeRequest | null> => {
+    const detail = await githubPullDetail(mr);
+    return detail?.request ?? null;
+  };
+  const first = await once();
+  if (first && !mergeStatusIsProvisional(first.mergeStatus)) return first;
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const second = await once();
+  if (second && !mergeStatusIsProvisional(second.mergeStatus)) return second;
+  return first ?? mr;
 }
 
 async function githubCheckJobs(repo: string, sha: string): Promise<Job[]> {

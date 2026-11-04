@@ -184,10 +184,24 @@ function parseJSON(text: string): unknown {
   }
 }
 
-/** `glab api <path>` parsed as JSON, or null on failure. */
-export async function glabJSON(apiPath: string, method?: string): Promise<unknown> {
+/**
+ * `glab api <path>` parsed as JSON, or null on failure.
+ * `fields` are sent with `--method` so GET parameters are not dropped.
+ * A `?query` on the path is not reliable for flags GitLab must act on.
+ */
+export async function glabJSON(
+  apiPath: string,
+  method?: string,
+  fields?: Record<string, string>,
+): Promise<unknown> {
   const args = ["api", "--hostname", "gitlab.com"];
-  if (method) args.push("-X", method);
+  if (method || fields) args.push("-X", method ?? "GET");
+  if (fields) {
+    for (const [key, value] of Object.entries(fields)) {
+      if (!/^[\w[\]]+$/.test(key)) continue;
+      args.push("-f", `${key}=${value}`);
+    }
+  }
   args.push(apiPath);
   const r = await run("glab", args);
   if (r.status !== 0 || !r.out) return null;

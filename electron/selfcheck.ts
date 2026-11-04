@@ -15,6 +15,8 @@ import {
   makeMergeRequest,
   makePipeline,
   mergeRequestIID,
+  mergeStatusIsProvisional,
+  mrBarTone,
   mrKey,
   normalizeMergeStatus,
   normalizePipelineStatus,
@@ -27,8 +29,10 @@ import {
   progressState,
   projectIDFromGraphQL,
   refLabel,
+  ringSlices,
   sameChange,
   sanitizePrefs,
+  settlePipeline,
   trayCounts,
   unresolvedFailures,
   type Job,
@@ -48,6 +52,37 @@ check("failure counts as finished but never passing", () => {
   const [status, fraction] = progressState(pipeline("failed", [job("success", 1), job("failed", 2), job("pending", 3)]));
   assert.equal(status, "failed");
   assert.ok(Math.abs(fraction - 2 / 3) < 0.001);
+});
+
+check("finished jobs clear a pipeline the list still calls running", () => {
+  const stuck = pipeline("running", [job("success", 1), job("success", 2), job("success", 3), job("success", 4)]);
+  assert.equal(settlePipeline(stuck).status, "success");
+  const mid = pipeline("running", [job("success", 1), job("created", 2)]);
+  assert.equal(settlePipeline(mid).status, "running");
+  const broken = pipeline("running", [job("success", 1), job("failed", 2)]);
+  assert.equal(settlePipeline(broken).status, "failed");
+});
+
+check("a running job fills its slice before it finishes", () => {
+  const now = 1_000_000;
+  const running = job("running", 1);
+  running.startedAt = now;
+  const [freshStatus, fresh] = progressState(pipeline("running", [running]), now);
+  assert.equal(freshStatus, "running");
+  assert.ok(fresh > 0.05 && fresh < 0.2);
+  running.startedAt = now - 45_000;
+  const halfway = progressState(pipeline("running", [running, job("created", 2)]), now)[1];
+  assert.ok(halfway > 0.2 && halfway < 0.5);
+  const done = progressState(pipeline("success", [job("success", 1)]), now)[1];
+  assert.equal(done, 1);
+});
+
+check("a running job owns the slice that gleams", () => {
+  const slices = ringSlices([job("success", 1), job("running", 2), job("created", 3)]);
+  assert.deepEqual(slices.map((s) => s.kind), ["done", "running", "wait"]);
+  assert.equal(slices[0].fill, 1);
+  assert.ok(slices[1].fill > 0 && slices[1].fill < 1);
+  assert.equal(slices[2].fill, 0);
 });
 
 check("canceled and skipped stay themselves", () => {
@@ -174,6 +209,19 @@ check("GitHub runs stay separate from GitLab", () => {
   const docs = makePipeline({ host: "github", projectID: 7, id: 100, project: "example/app", ref: "main", status: "success", updated: 30_000, sha: "abc", workflow: "Docs" });
   const ci = makePipeline({ host: "github", projectID: 7, id: 98, project: "example/app", ref: "main", status: "failed", updated: 20_000, sha: "abc", workflow: "CI" });
   assert.deepEqual(unresolvedFailures([docs, ci]).map((p) => p.workflow), ["CI"]);
+});
+
+check("menu bar MR color follows the request", async () => {
+  assert.equal(mergeStatusIsProvisional("checking"), true);
+  assert.equal(mergeStatusIsProvisional("unchecked"), true);
+  assert.equal(mergeStatusIsProvisional("mergeable"), false);
+  const waiting = makeMergeRequest({ projectID: 1, iid: 2, title: "Wait", mergeStatus: "checking" });
+  const ready = makeMergeRequest({ projectID: 1, iid: 3, title: "Ready", mergeStatus: "mergeable", pipelineStatus: "success" });
+  const blocked = makeMergeRequest({ projectID: 1, iid: 4, title: "Blocked", mergeStatus: "conflict" });
+  assert.equal(mrBarTone([waiting]), "running");
+  assert.equal(mrBarTone([ready]), "ready");
+  assert.equal(mrBarTone([ready, blocked]), "failed");
+  assert.equal(mrBarTone([]), "none");
 });
 
 check("GitHub pull request status", async () => {

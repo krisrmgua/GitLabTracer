@@ -5,6 +5,7 @@ import {
   isFailed,
   isReady,
   isRunning,
+  settlePipeline,
   isSuccess,
   mrKey,
   numberLabel,
@@ -178,8 +179,10 @@ export class Controller {
       notes.push("GitHub pull requests refresh incomplete. Showing the last pull requests.");
     }
 
-    // Reuse jobs while status+sha are unchanged.
+    // Reuse jobs while status+sha are unchanged. A live pipeline is the exception:
+    // its jobs move while the list still says "running".
     for (let i = 0; i < pipes.length; i++) {
+      if (isRunning(pipes[i])) continue;
       const old = previousPipes.get(pipelineKey(pipes[i]));
       if (old && old.status === pipes[i].status && old.sha === pipes[i].sha && old.jobs.length) {
         pipes[i] = { ...pipes[i], jobs: old.jobs };
@@ -188,12 +191,16 @@ export class Controller {
         if (cached) pipes[i] = { ...pipes[i], jobs: cached };
       }
     }
-    // Fetch jobs for the status-card pipeline, and for pipelines that just finished or newly failed.
+    // Fetch jobs for live pipelines, the status card, and pipelines that just finished or newly failed.
     const runningIndex = pipes.findIndex(isRunning);
     const cardIndex = runningIndex >= 0 ? runningIndex : pipes.length ? 0 : -1;
     const toLoad = new Set<number>();
     if (cardIndex >= 0 && !pipes[cardIndex].jobs.length) toLoad.add(cardIndex);
     pipes.forEach((p, i) => {
+      if (isRunning(p)) {
+        toLoad.add(i);
+        return;
+      }
       if (p.jobs.length) return;
       const key = pipelineKey(p);
       const leftActive = wasActive.has(key) && !isRunning(p);
@@ -201,8 +208,8 @@ export class Controller {
     });
     await Promise.all(
       [...toLoad].map(async (i) => {
-        const jobs = await model.jobsForPipeline(pipes[i]);
-        if (jobs) pipes[i] = { ...pipes[i], jobs };
+        const jobs = await model.jobsForPipeline(pipes[i], isRunning(pipes[i]));
+        if (jobs) pipes[i] = settlePipeline({ ...pipes[i], jobs });
       }),
     );
 
