@@ -43,7 +43,7 @@ interface TracerAPI {
   close: (key: string, sha: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<void>;
   openNotificationSettings: () => Promise<void>;
-  testNotification: () => Promise<void>;
+  testNotification: () => Promise<{ ok: boolean; message: string }>;
   copy: (text: string) => Promise<void>;
   fit: (width: number, height: number) => Promise<void>;
   hide: () => Promise<void>;
@@ -194,6 +194,8 @@ const ui = {
   mrError: null as string | null,
   mrMissing: false,
   confirming: null as "merge" | "close" | null,
+  testNote: null as string | null,
+  testNoteOk: true,
 };
 
 /** Bumped whenever the screen changes, so a late reply for the old screen is dropped. */
@@ -600,6 +602,11 @@ function renderSettings(s: TracerState): string {
           <button type="button" class="inline" data-act="notification-settings">Notification settings</button>
           <button type="button" class="inline" data-act="notification-test"${supported ? "" : " disabled"}>Send test</button>
         </div>
+        ${
+          ui.testNote
+            ? `<div class="note" style="color:${ui.testNoteOk ? "var(--green)" : "var(--orange)"}">${esc(ui.testNote)}</div>`
+            : ""
+        }
       </div>`,
     ])}
     <div class="section-label">Command-line tools</div>
@@ -1282,9 +1289,15 @@ async function act(name: string, el: HTMLElement): Promise<void> {
     case "notification-settings":
       void call(tracer.openNotificationSettings());
       return;
-    case "notification-test":
-      void call(tracer.testNotification());
+    case "notification-test": {
+      const result = await call(tracer.testNotification());
+      if (result) {
+        ui.testNote = result.message;
+        ui.testNoteOk = result.ok;
+        render();
+      }
       return;
+    }
     case "quit":
       void call(tracer.quit());
       return;

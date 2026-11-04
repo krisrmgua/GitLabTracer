@@ -249,7 +249,14 @@ function wireIpc(): void {
     );
   });
 
-  ipcMain.handle("tracer:testNotification", () => notifier.preview());
+  ipcMain.handle("tracer:testNotification", async () => {
+    // macOS suppresses banners for the frontmost app — drop the panel first.
+    if (panel && !panel.isDestroyed() && panel.isVisible()) {
+      panel.hide();
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return notifier.preview();
+  });
 
   ipcMain.handle("tracer:copy", (_e, text: unknown) => {
     if (typeof text === "string") clipboard.writeText(text);
