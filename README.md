@@ -14,6 +14,16 @@ Pipeline Tracer reads data through two command-line tools you sign in to yoursel
 You only need one of them. If one host isn't signed in, its sections stay empty until you log in.
 
 
+## Menu-bar previews
+
+Actual status icons for passed, running, queued, failed, canceled, and skipped work, plus populated and quiet counter capsules. Zero counters disappear while the icon remains.
+
+<a href="docs/screenshots/menu-bar.png"><img src="docs/screenshots/menu-bar.png" alt="Actual status icons for passed, running, queued, failed, canceled, and skipped work, plus populated and quiet counter capsules. Zero counters disappear while the icon remains." width="540" /></a>
+
+The labeled sheets enlarge the app’s actual rendered artwork 2× for detail. The neutral backdrops are presentation surfaces, not captures of a personal desktop.
+
+[Full menu-bar gallery and regeneration instructions](docs/menu-bar.md)
+
 ## Screenshots
 
 Screenshots of the current Electron interface on macOS, using fictional projects, accounts, jobs, and values. No personal data or live credentials are used.
@@ -23,7 +33,7 @@ Screenshots of the current Electron interface on macOS, using fictional projects
 The gallery includes detail views, settings, and available actions. Click an image for the full-resolution capture.
 
 <details>
-<summary>View all 15 screenshots</summary>
+<summary>View dashboard screenshots</summary>
 
 | Menu Bar | Overview |
 | --- | --- |

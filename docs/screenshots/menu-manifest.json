@@ -1,0 +1,10 @@
+[
+  {
+    "file": "menu-bar.png",
+    "caption": "Production menu-bar icons for passed, running, queued, failed, canceled, and skipped states, plus populated and quiet counter capsules.",
+    "size": {
+      "width": 1080,
+      "height": 1988
+    }
+  }
+]
