@@ -1,11 +1,14 @@
 import { createCanvas, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
-import type { RingStatus } from "./logic";
+import type { MrBarTone, RingSlice, RingStatus } from "./logic";
 import { trayIconPng } from "./icons";
 
 const CAPSULE_FILL = "rgba(14, 23, 36, 0.84)"; // ~ Swift calibratedRed 0.055,0.09,0.14
 const CAPSULE_STROKE = "rgba(255, 255, 255, 0.16)";
 const DIVIDER = "rgba(255, 255, 255, 0.22)";
 const LABEL_MR = "rgb(255, 255, 255)";
+const LABEL_READY = "rgb(52, 199, 89)";
+const LABEL_WAIT = "rgb(255, 159, 10)";
+const LABEL_MUTED = "rgb(142, 142, 147)";
 const LABEL_RUN = "rgb(50, 173, 230)"; // systemCyan-ish
 const LABEL_FAIL = "rgb(255, 69, 58)"; // systemRed-ish
 
@@ -19,6 +22,23 @@ export interface CapsuleCounts {
   mergeRequests: number;
   running: number;
   failed: number;
+  /** Color of the MR count. Omitted counts stay white. */
+  mrTone?: MrBarTone;
+}
+
+export function mrCounterColor(tone: MrBarTone | undefined): string {
+  switch (tone) {
+    case "ready":
+      return LABEL_READY;
+    case "running":
+      return LABEL_WAIT;
+    case "failed":
+      return LABEL_FAIL;
+    case "pending":
+      return LABEL_MUTED;
+    default:
+      return LABEL_MR;
+  }
 }
 
 function roundRect(
@@ -41,7 +61,9 @@ function roundRect(
 
 function counterParts(counts: CapsuleCounts): { text: string; color: string }[] {
   const parts: { text: string; color: string }[] = [];
-  if (counts.mergeRequests > 0) parts.push({ text: `MR ${counts.mergeRequests}`, color: LABEL_MR });
+  if (counts.mergeRequests > 0) {
+    parts.push({ text: `MR ${counts.mergeRequests}`, color: mrCounterColor(counts.mrTone) });
+  }
   if (counts.running > 0) parts.push({ text: `Run ${counts.running}`, color: LABEL_RUN });
   if (counts.failed > 0) parts.push({ text: `Fail ${counts.failed}`, color: LABEL_FAIL });
   return parts;
@@ -56,6 +78,7 @@ export async function trayCapsulePng(
   progress: number,
   failing: boolean,
   counts: CapsuleCounts,
+  slices: RingSlice[] = [],
 ): Promise<{ png: Buffer; width: number; height: number }> {
   const scale = 2;
   const measure = createCanvas(4, 4).getContext("2d");
@@ -81,7 +104,7 @@ export async function trayCapsulePng(
   ctx.stroke();
 
   // Progress ring.
-  const ringPng = trayIconPng(failing ? "failed" : status, progress, failing, RING_SIZE * scale);
+  const ringPng = trayIconPng(failing ? "failed" : status, progress, failing, RING_SIZE * scale, slices);
   const ring = await loadImage(ringPng);
   ctx.drawImage(ring, RING_X, PAD_Y, RING_SIZE, RING_SIZE);
 

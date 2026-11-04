@@ -1,4 +1,4 @@
-import type { RingStatus } from "./logic";
+import type { RingSlice, RingStatus } from "./logic";
 import { encodePng, over, rasterize, segmentDistance, type RGBA } from "./png";
 
 const RING_COLORS: Record<RingStatus, [number, number, number]> = {
@@ -15,7 +15,14 @@ const RING_COLORS: Record<RingStatus, [number, number, number]> = {
  * finished. With unresolved failures it becomes a solid red disc with a white "!" so the
  * failure reads at a glance even on Windows, where the tray has no room for text.
  */
-export function trayIconPng(status: RingStatus, progress: number, failing: boolean, size: number): Buffer {
+export function trayIconPng(
+  status: RingStatus,
+  progress: number,
+  failing: boolean,
+  size: number,
+  slices: RingSlice[] = [],
+  now = Date.now(),
+): Buffer {
   const c = size / 2;
   const lineWidth = size * (3 / 20);
   const radius = size / 2 - lineWidth / 2 - size * 0.04;
@@ -24,6 +31,7 @@ export function trayIconPng(status: RingStatus, progress: number, failing: boole
   const fraction = Math.min(Math.max(progress, 0), 1);
   const outer = size / 2 - size * 0.04;
   const white: RGBA = [255, 255, 255, 1];
+  const gleamAt = (now % 1100) / 1100;
 
   return encodePng(
     size,
@@ -41,7 +49,27 @@ export function trayIconPng(status: RingStatus, progress: number, failing: boole
       if (Math.abs(d - radius) > lineWidth / 2) return null;
       // Angle from 12 o'clock, clockwise, 0..1.
       const angle = (Math.atan2(dx, -dy) / (2 * Math.PI) + 1) % 1;
-      return angle <= fraction ? [r, g, b, 1] : [r, g, b, trackAlpha];
+      if (slices.length === 0) return angle <= fraction ? [r, g, b, 1] : [r, g, b, trackAlpha];
+      const n = slices.length;
+      const index = Math.min(n - 1, Math.floor(angle * n));
+      const local = angle * n - index;
+      const slice = slices[index];
+      if (n > 1 && local > 0.94) return [r, g, b, trackAlpha * 0.35];
+      const filled = slice.kind === "done" || local <= slice.fill;
+      let rr = r;
+      let gg = g;
+      let bb = b;
+      let alpha = filled ? 1 : trackAlpha;
+      if (slice.kind === "running") {
+        let dist = Math.abs(local - gleamAt);
+        if (dist > 0.5) dist = 1 - dist;
+        const gleam = Math.exp(-(dist * dist) / 0.012);
+        rr = rr + (255 - rr) * gleam;
+        gg = gg + (255 - gg) * gleam;
+        bb = bb + (255 - bb) * gleam;
+        alpha = Math.min(1, alpha + gleam * 0.85);
+      }
+      return [rr, gg, bb, alpha];
     }),
   );
 }

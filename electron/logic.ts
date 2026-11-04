@@ -10,6 +10,8 @@ export interface Job {
   status: string;
   url: string;
   duration: number | null;
+  /** Epoch ms. Lets the ring move while this job is still running. */
+  startedAt?: number | null;
 }
 
 export interface Pipeline {
@@ -108,6 +110,23 @@ export const mrKey = (mr: MergeRequest): string =>
 export const numberLabel = (mr: MergeRequest): string => (mr.host === "github" ? `#${mr.iid}` : `!${mr.iid}`);
 export const isReady = (mr: MergeRequest): boolean => !mr.draft && mr.mergeStatus === "mergeable";
 
+/** GitLab/GitHub have not finished computing mergeability yet. */
+export function mergeStatusIsProvisional(status: string): boolean {
+  return status === "checking" || status === "unchecked";
+}
+
+export type MrBarTone = "none" | "ready" | "running" | "failed" | "pending";
+
+/** Menu-bar MR label. One waiting request should not stay white. */
+export function mrBarTone(mrs: MergeRequest[]): MrBarTone {
+  if (mrs.length === 0) return "none";
+  const tones = mrs.map(mrTone);
+  if (tones.includes("failed")) return "failed";
+  if (tones.includes("running")) return "running";
+  if (tones.every((t) => t === "ready")) return "ready";
+  return "pending";
+}
+
 export const pipelineKey = (p: Pipeline): string => `${p.host}:${p.projectID}:${p.id}`;
 export function refLabel(p: Pipeline): string {
   if (p.host !== "github" || !p.workflow) return p.ref;
@@ -119,6 +138,20 @@ export const isFailed = (p: Pipeline): boolean => p.status === "failed";
 export const isSuccess = (p: Pipeline): boolean => p.status === "success" || p.status === "passed";
 export const isActiveStatus = (s: string): boolean => ACTIVE.has(s);
 export const isDone = (s: string): boolean => DONE.has(s);
+
+/**
+ * The pipeline list keeps saying "running" after every job has finished.
+ * Trust the jobs once none of them are still waiting or running.
+ */
+export function settlePipeline<T extends Pipeline>(p: T): T {
+  if (!isActiveStatus(p.status) || p.jobs.length === 0) return p;
+  const statuses = p.jobs.map((j) => j.status);
+  if (statuses.some((s) => !DONE.has(s))) return p;
+  if (statuses.includes("failed")) return { ...p, status: "failed" };
+  if (statuses.every((s) => s === "canceled" || s === "cancelled")) return { ...p, status: "canceled" };
+  if (statuses.every((s) => s === "skipped")) return { ...p, status: "skipped" };
+  return { ...p, status: "success" };
+}
 
 /** `refs/merge-requests/15/head` -> 15. Branch and main pipelines are null. */
 export function mergeRequestIID(p: Pipeline): number | null {
@@ -210,8 +243,39 @@ export function groupTitle(pipelines: Pipeline[]): string {
 
 export type RingStatus = "passed" | "running" | "failed" | "pending" | "canceled" | "skipped";
 
-/** Overall state and finished-job fraction. Failure beats running, which beats waiting. */
-export function progressState(p: Pipeline | null | undefined): [RingStatus, number] {
+/** A running job fills most of its slice, then waits for the real finish. */
+const RUN_FILL = 0.85;
+const RUN_TAU_SEC = 45;
+
+export type RingSliceKind = "done" | "running" | "wait";
+
+/** One job's sector of the ring. `fill` is how much of that sector is complete. */
+export interface RingSlice {
+  kind: RingSliceKind;
+  fill: number;
+}
+
+/** Each job owns an equal slice. A running job is the slice that should gleam. */
+export function ringSlices(jobs: Job[], now = Date.now()): RingSlice[] {
+  return jobs.map((job) => {
+    if (DONE.has(job.status)) return { kind: "done", fill: 1 };
+    if (job.status === "running") return { kind: "running", fill: jobRingShare(job, now) };
+    return { kind: "wait", fill: 0 };
+  });
+}
+
+/** Finished jobs are a full share. A running job grows with elapsed time and stops short of done. */
+export function jobRingShare(job: Job, now = Date.now()): number {
+  if (DONE.has(job.status)) return 1;
+  if (job.status !== "running") return 0;
+  const started = job.startedAt ?? (typeof job.duration === "number" ? now - job.duration * 1000 : null);
+  const elapsed = started == null ? 0 : Math.max(0, (now - started) / 1000);
+  const grown = 1 - Math.exp(-elapsed / RUN_TAU_SEC);
+  return 0.08 + (RUN_FILL - 0.08) * grown;
+}
+
+/** Overall state and ring fill. Failure beats running, which beats waiting. */
+export function progressState(p: Pipeline | null | undefined, now = Date.now()): [RingStatus, number] {
   if (!p) return ["pending", 0];
   if (p.status === "canceled" || p.status === "cancelled") return ["canceled", 1];
   if (p.status === "skipped") return ["skipped", 1];
@@ -229,7 +293,7 @@ export function progressState(p: Pipeline | null | undefined): [RingStatus, numb
     }
   }
   const statuses = p.jobs.map((j) => j.status);
-  const progress = statuses.filter((s) => DONE.has(s)).length / statuses.length;
+  const progress = p.jobs.reduce((sum, job) => sum + jobRingShare(job, now), 0) / p.jobs.length;
   if (statuses.includes("failed")) return ["failed", progress];
   if (statuses.includes("running")) return ["running", progress];
   if (statuses.some((s) => WAITING.has(s))) return ["pending", progress];
@@ -440,6 +504,7 @@ export function parseGitHubJob(item: Json): Job | null {
     status: githubStatus(str(item.status), typeof item.conclusion === "string" ? item.conclusion : null),
     url: url.startsWith("https://github.com/") ? url : "",
     duration: start != null && end != null && end >= start ? (end - start) / 1000 : null,
+    startedAt: start,
   };
 }
 
@@ -455,6 +520,7 @@ export function parseGitLabJob(d: Json): Job | null {
     status,
     url: str(d.web_url),
     duration: typeof d.duration === "number" ? d.duration : null,
+    startedAt: parseDate(d.started_at),
   };
 }
 

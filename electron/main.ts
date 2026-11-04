@@ -7,7 +7,9 @@ import {
   mrKey,
   pipelineKey,
   progressState,
+  ringSlices,
   refLabel,
+  mrBarTone,
   trayCounts,
   isDone,
   type Job,
@@ -130,14 +132,17 @@ async function trayImage(
   requests: number,
   running: number,
   failed: number,
+  tone: ReturnType<typeof mrBarTone> = "none",
 ): Promise<Electron.NativeImage> {
   const [status, progress] = progressState(controller.cardPipeline);
+  const slices = ringSlices(controller.cardPipeline?.jobs ?? []);
   if (isMac) {
     const { png, width, height } = await trayCapsulePng(status, progress, false, {
       mergeRequests: requests,
       running,
       failed,
-    });
+      mrTone: tone,
+    }, slices);
     return nativeImage.createFromBuffer(png, { scaleFactor: 2, width, height });
   }
   const size = 16;
@@ -147,13 +152,13 @@ async function trayImage(
     scaleFactor: 1,
     width: size,
     height: size,
-    buffer: trayIconPng(status, progress, failing, size),
+    buffer: trayIconPng(status, progress, failing, size, slices),
   });
   image.addRepresentation({
     scaleFactor: 2,
     width: size * 2,
     height: size * 2,
-    buffer: trayIconPng(status, progress, failing, size * 2),
+    buffer: trayIconPng(status, progress, failing, size * 2, slices),
   });
   return image;
 }
@@ -161,11 +166,13 @@ async function trayImage(
 async function updateTray(): Promise<void> {
   if (!tray || !controller) return;
   const { requests, running, failed } = trayCounts(controller.pipelines, controller.mrs);
+  const tone = mrBarTone(controller.mrs);
   const [status, progress] = progressState(controller.cardPipeline);
-  const key = `${status}|${progress.toFixed(2)}|${requests}|${running}|${failed}`;
+  const shining = controller.cardPipeline?.jobs.some((j) => j.status === "running") ?? false;
+  const key = `${status}|${progress.toFixed(2)}|${requests}|${running}|${failed}|${tone}|${shining ? Math.floor(Date.now() / 180) : 0}`;
   if (key !== lastTrayKey) {
     lastTrayKey = key;
-    tray.setImage(await trayImage(requests, running, failed));
+    tray.setImage(await trayImage(requests, running, failed, tone));
   }
   // Counters live inside the capsule image on Mac (Swift parity). Clear any title.
   if (isMac) tray.setTitle("");
@@ -293,6 +300,11 @@ async function boot(): Promise<void> {
   applyLoginItem(store.prefs);
 
   tray = new Tray(await trayImage(0, 0, 0));
+  // The ring fill depends on how long the current job has been running.
+  setInterval(() => {
+    const live = controller?.pipelines.some((p) => p.jobs.some((j) => j.status === "running"));
+    if (live) void updateTray();
+  }, 180);
   tray.setToolTip("Pipeline Tracer");
   if (isMac) tray.setTitle("");
   tray.on("click", () => togglePanel());
