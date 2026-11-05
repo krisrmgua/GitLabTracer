@@ -5,7 +5,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
     private var statusItem: NSStatusItem!
     private var menuController: MenuController!
 
-    public override init() { super.init() }
+    public override init() {
+        super.init()
+        UNUserNotificationCenter.current().delegate = self
+    }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         if let icon = Bundle.main.url(forResource: "PipelineTracer", withExtension: "icns"),
@@ -13,6 +16,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
             NSApp.applicationIconImage = image
         }
         UNUserNotificationCenter.current().delegate = self
+        if CommandLine.arguments.contains("--notify") {
+            // Live alerts from the Electron app. Same banner path as Send test.
+            NSApp.setActivationPolicy(.accessory)
+            Notifier.requestAuthorization { granted in
+                guard granted, Notifier.postFromCommandLine() else {
+                    fputs("Enable Pipeline Tracer notifications in macOS Notifications settings first.\n", stderr)
+                    exit(2)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                fputs("Notification timed out.\n", stderr)
+                exit(1)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--notification-preview") {
             // Headless test path used by the Electron app. Exit after queueing.
             NSApp.setActivationPolicy(.accessory)
@@ -29,6 +47,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
                 fputs("Notification preview timed out.\n", stderr)
                 exit(1)
             }
+            return
+        }
+        if Bundle.main.bundlePath.contains("NotificationPreview.app") {
+            // A banner click relaunches this helper. Open the link and do not start a second menu.
+            NSApp.setActivationPolicy(.accessory)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }
             return
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -54,5 +78,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
             NSWorkspace.shared.open(url)
         }
         completionHandler()
+        if Bundle.main.bundlePath.contains("NotificationPreview.app") {
+            NSApp.terminate(nil)
+        }
     }
 }

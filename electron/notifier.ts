@@ -123,17 +123,8 @@ async function sendViaOsascript(body: string): Promise<boolean> {
  * Banners are titled Pipeline Tracer. Failures play the default sound and ask for critical
  * urgency where the OS honors it. Clicking opens the event's GitLab or GitHub page.
  */
-export function post(
-  title: string,
-  subtitle: string,
-  body: string,
-  thread: string,
-  important: boolean,
-  url: string,
-  kind: NotificationKind,
-): void {
+function showElectron(content: ReturnType<typeof notificationContent>): void {
   if (!Notification.isSupported()) return;
-  const content = notificationContent(title, subtitle, body, thread, important, url, kind);
   const isMac = process.platform === "darwin";
   const { image, path: iconPath } = notificationIcon();
   const n = new Notification({
@@ -156,6 +147,35 @@ export function post(
   n.on("close", release);
   n.on("failed", release);
   n.show();
+}
+
+/** macOS live alerts use the same UserNotifications helper as Send test. */
+function sendLiveViaSwift(content: ReturnType<typeof notificationContent>): boolean {
+  const bin = swiftPreviewBinary();
+  if (!bin) return false;
+  execFile(
+    bin,
+    ["--notify", content.subtitle, "", content.body, content.thread, content.url, content.kind, content.sound ? "1" : "0"],
+    { timeout: 12_000 },
+    (err) => {
+      if (err) showElectron(content);
+    },
+  );
+  return true;
+}
+
+export function post(
+  title: string,
+  subtitle: string,
+  body: string,
+  thread: string,
+  important: boolean,
+  url: string,
+  kind: NotificationKind,
+): void {
+  const content = notificationContent(title, subtitle, body, thread, important, url, kind);
+  if (process.platform === "darwin" && sendLiveViaSwift(content)) return;
+  showElectron(content);
 }
 
 export interface PreviewResult {
