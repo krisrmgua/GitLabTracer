@@ -626,7 +626,7 @@ function renderSettings(s: TracerState): string {
       choice("pipelineHours", "Completion history", PIPELINE_HOUR_CHOICES, p.pipelineHours, "hours"),
       toggle("mergeButton", "Show merge actions", p.mergeButton),
     ])}
-    <div class="section-label">Requests</div>
+    <div class="section-label">Show All Merge Requests</div>
     ${panel(repoToggles(s))}
     <div class="tiny">Off lists requests you opened. On lists every open request in that repo. Merge stays hidden when you cannot merge.</div>
     <div class="section-label">Startup</div>
