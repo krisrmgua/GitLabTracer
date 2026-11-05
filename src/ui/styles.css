@@ -169,6 +169,18 @@ button {
   font-weight: 600;
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.repo-filter {
+  flex: 0 0 150px;
+  width: 150px;
+}
+
 .panel {
   background: var(--card-soft);
   border: 1px solid var(--stroke);

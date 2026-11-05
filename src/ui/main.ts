@@ -185,6 +185,7 @@ const ui = {
   loadingLog: false,
   logScrollToEnd: false,
   search: "",
+  repoFilter: "",
   showOther: false,
   eventFilter: "All" as EventFilter,
   expandedHistory: null as string | null,
@@ -593,8 +594,18 @@ function choice(key: keyof Prefs, label: string, options: number[], value: numbe
 function repoToggles(s: TracerState): string[] {
   const repos = s.repos ?? [];
   if (!repos.length) return ['<div class="note" style="padding:10px">Repos show up here after a refresh.</div>'];
+  const needle = ui.repoFilter.trim().toLowerCase();
+  const filtered = needle
+    ? repos.filter((repo) => {
+        const host = repo.host === "github" ? "github" : "gitlab";
+        return repo.name.toLowerCase().includes(needle) || host.includes(needle);
+      })
+    : repos;
+  if (!filtered.length) {
+    return ['<div class="note" style="padding:10px">No repos match that filter.</div>'];
+  }
   const enabled = new Set(s.prefs.showAllRequests ?? []);
-  return repos.map((repo) => {
+  return filtered.map((repo) => {
     const host = repo.host === "github" ? "GitHub" : "GitLab";
     const on = enabled.has(repo.key);
     return `<label class="pref"><span class="label">${esc(repo.name)} <span class="tiny">${host}</span></span><input type="checkbox" class="switch" data-repo="${esc(repo.key)}"${on ? " checked" : ""} /></label>`;
@@ -626,7 +637,10 @@ function renderSettings(s: TracerState): string {
       choice("pipelineHours", "Completion history", PIPELINE_HOUR_CHOICES, p.pipelineHours, "hours"),
       toggle("mergeButton", "Show merge actions", p.mergeButton),
     ])}
-    <div class="section-label">Show All Merge Requests</div>
+    <div class="section-head">
+      <div class="section-label">Show All Merge Requests</div>
+      <input id="repo-filter" class="search repo-filter" type="search" placeholder="Filter repos…" spellcheck="false" aria-label="Filter repositories" />
+    </div>
     ${panel(repoToggles(s))}
     <div class="tiny">Off lists requests you opened. On lists every open request in that repo. Merge stays hidden when you cannot merge.</div>
     <div class="section-label">Startup</div>
@@ -1009,6 +1023,8 @@ function render(): void {
   if (changed) {
     const search = document.getElementById("log-search");
     if (search instanceof HTMLInputElement) search.value = ui.search;
+    const repoFilter = document.getElementById("repo-filter");
+    if (repoFilter instanceof HTMLInputElement) repoFilter.value = ui.repoFilter;
     content.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
       const saved = scrolls.get(el.dataset.scroll!);
       if (saved && (same || el.hasAttribute("data-sticky"))) [el.scrollTop, el.scrollLeft] = saved;
@@ -1399,6 +1415,11 @@ document.addEventListener("change", async (e) => {
 
 document.addEventListener("input", (e) => {
   const el = e.target as HTMLInputElement;
+  if (el.id === "repo-filter") {
+    ui.repoFilter = el.value;
+    render();
+    return;
+  }
   if (el.id !== "log-search") return;
   ui.search = el.value;
   const lines = visibleLines();
