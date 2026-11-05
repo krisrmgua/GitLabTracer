@@ -604,53 +604,6 @@ button {
   word-break: break-word;
 }
 
-.workspace-grid {
-  display: flex;
-  height: 100%;
-}
-
-.workspace-grid .list {
-  width: 275px;
-  flex: 0 0 275px;
-  overflow-y: auto;
-  padding: 12px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.workspace-grid .detail {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 14px;
-}
-
-.mr-item {
-  appearance: none;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  margin-bottom: 6px;
-}
-
-.mr-item.selected {
-  background: rgba(77, 209, 245, 0.12);
-}
-
-.mr-item .t {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  font-weight: 500;
-}
-
 .description {
   font-size: 11px;
   white-space: pre-wrap;

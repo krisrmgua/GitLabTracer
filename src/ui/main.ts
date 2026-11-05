@@ -790,20 +790,6 @@ function renderGroup(): string {
 
 function renderWorkspace(s: TracerState, mr: MergeRequest): string {
   const key = mrKey(mr);
-  const items = s.mrs
-    .map((item) => {
-      const c = tone(mrTone(item));
-      return `<button type="button" class="mr-item${mrKey(item) === key ? " selected" : ""}" data-act="mr" data-key="${esc(mrKey(item))}">
-        ${tinted("branch", c, 13, "padding-top:1px")}
-        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-          <span class="t">${esc(numberLabel(item))}&ensp;${esc(item.title)}</span>
-          <span class="tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(item.project)}</span>
-          <span class="tiny" style="color:${c}">${esc(mrState(item))}</span>
-        </span>
-      </button>`;
-    })
-    .join("");
-
   const gh = mr.host === "github";
   const busy = s.merging != null || s.closing != null;
   const error =
@@ -832,42 +818,37 @@ function renderWorkspace(s: TracerState, mr: MergeRequest): string {
     : "";
   const closeLabel = s.closing === key ? "Closing…" : gh ? "Close PR" : "Close MR";
 
-  const detail = [
-    `<div class="detail-head">
+  // Full-width detail only — the overview already listed open requests.
+  return `<div class="stack wide" data-scroll="mr-detail">
+    <div class="detail-head">
       ${tinted("branch", "var(--cyan)", 14, "padding-top:1px")}
       <div class="main">
         <span class="t" style="font-size:13px">${esc(numberLabel(mr))}&ensp;${esc(mr.title)}</span>
         <span class="s">${esc(mr.project)}</span>
       </div>
       ${openButton(mr.url, gh ? "Open pull request on GitHub" : "Open merge request in GitLab")}
-    </div>`,
-    badge(mrState(mr), mrTone(mr)),
-    ui.mrLoading ? loading(gh ? "Loading pull request…" : "Loading merge request…") : "",
-    error ? warnLine(error) : "",
-    ui.mrBody ? `<div class="description">${esc(descriptionSummary(ui.mrBody))}</div>` : "",
-    `<div class="stack">
+    </div>
+    ${badge(mrState(mr), mrTone(mr))}
+    ${ui.mrLoading ? loading(gh ? "Loading pull request…" : "Loading merge request…") : ""}
+    ${error ? warnLine(error) : ""}
+    ${ui.mrBody ? `<div class="description">${esc(descriptionSummary(ui.mrBody))}</div>` : ""}
+    <div class="stack">
       ${meta("Source", mr.sourceBranch || "Not reported")}
       ${meta("Target", mr.targetBranch || "Not reported")}
       ${ui.mrAuthor ? meta("Author", ui.mrAuthor) : ""}
-    </div>`,
-    panel(checks),
-    `<div style="display:flex;gap:8px">
+    </div>
+    ${panel(checks)}
+    <div style="display:flex;gap:8px">
       ${mergeButton}
       <button type="button" class="action${s.prefs.mergeButton ? " fit" : ""}" data-act="close-ask"${closeOff ? " disabled" : ""}>${closeLabel}</button>
-    </div>`,
-    s.prefs.mergeButton
-      ? `<div class="note ${isReady(mr) ? "ok-text" : "bad-text"}" style="font-weight:500">${esc(
-          isReady(mr) ? "Ready to merge." : `Merge unavailable: ${mrState(mr)}.`,
-        )}</div>`
-      : "",
-  ];
-
-  return `<div class="workspace-grid">
-    <div class="list" data-scroll="mr-list" data-sticky>
-      <div class="heading" style="padding:0 2px 8px">Requests ${countLabel(s.mrs.length, "var(--cyan)")}</div>
-      ${items || empty("No open requests")}
     </div>
-    <div class="detail" data-scroll="mr-detail"><div class="stack wide">${detail.filter(Boolean).join("")}</div></div>
+    ${
+      s.prefs.mergeButton
+        ? `<div class="note ${isReady(mr) ? "ok-text" : "bad-text"}" style="font-weight:500">${esc(
+            isReady(mr) ? "Ready to merge." : `Merge unavailable: ${mrState(mr)}.`,
+          )}</div>`
+        : ""
+    }
   </div>`;
 }
 
