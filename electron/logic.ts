@@ -51,6 +51,8 @@ export interface MergeRequest {
   sha: string;
   /** False when the signed-in user lacks permission to merge into the target repository/branch. */
   canMerge: boolean;
+  /** Login of the person who opened the request. Empty when the host did not send one. */
+  author: string;
 }
 
 export interface ActivityEvent {
@@ -104,6 +106,7 @@ export function makeMergeRequest(
     targetBranch: "",
     sha: "",
     canMerge: true,
+    author: "",
     ...m,
   };
 }
@@ -427,6 +430,7 @@ export function parseMergeRequest(m: Json): MergeRequest | null {
     targetBranch: str(m.target_branch),
     sha: str(m.sha),
     canMerge: user?.can_merge !== false,
+    author: str(obj(m.author)?.username),
   });
 }
 
@@ -456,6 +460,7 @@ export function parseMergeRequestGraphQL(node: Json): MergeRequest | null {
     targetBranch: str(node.targetBranch),
     sha: str(node.diffHeadSha),
     canMerge: perms?.canMerge !== false,
+    author: str(obj(node.author)?.username),
   });
 }
 
@@ -481,11 +486,58 @@ export function parseInstancePipeline(d: Json): Pipeline | null {
 }
 
 /** `owner/repo` with the characters GitHub allows. Anything else is rejected before it reaches `gh`. */
+const repoPart = (part: string) => part !== "." && part !== ".." && /^[\p{L}\p{N}._-]+$/u.test(part);
+
 export function githubRepoName(name: string): string | null {
   const parts = name.split("/");
   if (parts.length !== 2) return null;
-  const ok = (part: string) => /^[\p{L}\p{N}._-]+$/u.test(part);
-  return ok(parts[0]) && ok(parts[1]) ? name : null;
+  return repoPart(parts[0]) && repoPart(parts[1]) ? name : null;
+}
+
+/** GitLab group/project path, including subgroups. Rejects anything that could change a query. */
+export function gitlabProjectPath(path: string): string | null {
+  const parts = path.split("/");
+  if (parts.length < 2 || parts.length > 20) return null;
+  return parts.every(repoPart) ? path : null;
+}
+
+export interface TrackedRepo {
+  host: "gitlab" | "github";
+  /** `gitlab:group/project` or `github:owner/name` */
+  key: string;
+  name: string;
+}
+
+export function parseTrackedRepoKey(key: string): { host: "gitlab" | "github"; name: string } | null {
+  if (key.startsWith("gitlab:")) {
+    const name = gitlabProjectPath(key.slice("gitlab:".length));
+    return name ? { host: "gitlab", name } : null;
+  }
+  if (key.startsWith("github:")) {
+    const name = githubRepoName(key.slice("github:".length));
+    return name ? { host: "github", name } : null;
+  }
+  return null;
+}
+
+/** Keeps the first copy of each request. Later copies fill in a missing author. */
+export function combineMergeRequests(lists: MergeRequest[][]): MergeRequest[] {
+  const byKey = new Map<string, MergeRequest>();
+  for (const list of lists) {
+    for (const mr of list) {
+      const key = mrKey(mr);
+      const prev = byKey.get(key);
+      if (!prev) byKey.set(key, mr);
+      else if (!prev.author && mr.author) byKey.set(key, { ...prev, author: mr.author });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0));
+}
+
+export function sameStrings(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Set(a);
+  return b.every((item) => left.has(item));
 }
 
 /** Maps a workflow run or check onto the statuses the panel already uses. */
@@ -655,6 +707,7 @@ export function parseGitHubPull(node: Json): MergeRequest | null {
     targetBranch: str(node.baseRefName),
     sha: str(node.headRefOid),
     canMerge: githubCanMerge(repo.viewerPermission),
+    author: str(obj(node.author)?.login),
   });
 }
 
@@ -846,6 +899,11 @@ export interface Prefs {
   rememberPlace: boolean;
   /** Opens the app when you sign in (macOS login item / Windows Startup). */
   startAtLogin: boolean;
+  /**
+   * Repo keys (`gitlab:group/project` or `github:owner/name`) that list every
+   * open request. Missing keys stay on requests you opened.
+   */
+  showAllRequests: string[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -854,6 +912,7 @@ export const DEFAULT_PREFS: Prefs = {
   mergeButton: true,
   rememberPlace: false,
   startAtLogin: true,
+  showAllRequests: [],
 };
 
 export function sanitizePrefs(input: Partial<Prefs> | null | undefined, base: Prefs = DEFAULT_PREFS): Prefs {
@@ -864,7 +923,24 @@ export function sanitizePrefs(input: Partial<Prefs> | null | undefined, base: Pr
     mergeButton: typeof p.mergeButton === "boolean" ? p.mergeButton : base.mergeButton,
     rememberPlace: typeof p.rememberPlace === "boolean" ? p.rememberPlace : base.rememberPlace,
     startAtLogin: typeof p.startAtLogin === "boolean" ? p.startAtLogin : base.startAtLogin,
+    showAllRequests: Array.isArray(p.showAllRequests) ? sanitizeShowAll(p.showAllRequests) : base.showAllRequests,
   };
+}
+
+function sanitizeShowAll(input: unknown[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of input) {
+    if (typeof item !== "string") continue;
+    const repo = parseTrackedRepoKey(item);
+    if (!repo) continue;
+    const key = `${repo.host}:${repo.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= 40) break;
+  }
+  return out;
 }
 
 export interface CliStatus {
@@ -884,6 +960,8 @@ export interface TracerState {
   merging: string | null;
   closing: string | null;
   prefs: Prefs;
+  /** Repos you belong to, so Preferences can offer a per-repo request toggle. */
+  repos: TrackedRepo[];
   platform: string;
   /** From package.json via Electron app.getVersion(). */
   version: string;

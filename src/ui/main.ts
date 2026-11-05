@@ -418,11 +418,13 @@ function groupRow(g: PipelineGroup): string {
 function mrRow(mr: MergeRequest): string {
   const c = tone(mrTone(mr));
   const st = mrState(mr);
+  const showAuthor = (state?.prefs.showAllRequests ?? []).includes(`${mr.host}:${mr.project}`) && mr.author;
+  const subtitle = showAuthor ? `${mr.project} · ${mr.author}` : mr.project;
   return `<button type="button" class="row" data-act="mr" data-key="${esc(mrKey(mr))}" title="${esc(`${numberLabel(mr)} ${mr.title} — ${st}`)}">
     ${tinted("branch", c, 19, "width:22px")}
     <span class="main">
       <span class="t">${esc(numberLabel(mr))}&ensp;${esc(mr.title)}</span>
-      <span class="s">${esc(mr.project)}</span>
+      <span class="s">${esc(subtitle)}</span>
     </span>
     <span class="when" style="color:${c}">${esc(st)}</span>
     <span class="chev">${icon("chevronRight", 10)}</span>
@@ -588,6 +590,17 @@ function choice(key: keyof Prefs, label: string, options: number[], value: numbe
   return `<label class="pref"><span class="label">${esc(label)}</span><select class="select" data-pref="${key}">${opts}</select></label>`;
 }
 
+function repoToggles(s: TracerState): string[] {
+  const repos = s.repos ?? [];
+  if (!repos.length) return ['<div class="note" style="padding:10px">Repos show up here after a refresh.</div>'];
+  const enabled = new Set(s.prefs.showAllRequests ?? []);
+  return repos.map((repo) => {
+    const host = repo.host === "github" ? "GitHub" : "GitLab";
+    const on = enabled.has(repo.key);
+    return `<label class="pref"><span class="label">${esc(repo.name)} <span class="tiny">${host}</span></span><input type="checkbox" class="switch" data-repo="${esc(repo.key)}"${on ? " checked" : ""} /></label>`;
+  });
+}
+
 function cliRow(name: string, path: string | null): string {
   return `<div class="cli-row">
     ${tinted("terminal", path ? "var(--green)" : "var(--orange)", 12)}
@@ -613,6 +626,9 @@ function renderSettings(s: TracerState): string {
       choice("pipelineHours", "Completion history", PIPELINE_HOUR_CHOICES, p.pipelineHours, "hours"),
       toggle("mergeButton", "Show merge actions", p.mergeButton),
     ])}
+    <div class="section-label">Requests</div>
+    ${panel(repoToggles(s))}
+    <div class="tiny">Off lists requests you opened. On lists every open request in that repo. Merge stays hidden when you cannot merge.</div>
     <div class="section-label">Startup</div>
     ${panel([toggle("startAtLogin", "Open at login", p.startAtLogin)])}
     <div class="section-label">Notifications</div>
@@ -1361,6 +1377,15 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement | HTMLSelectElement;
+  const repoKey = el.dataset.repo;
+  if (repoKey && el instanceof HTMLInputElement && state) {
+    const current = state.prefs.showAllRequests ?? [];
+    const showAllRequests = el.checked ? [...current, repoKey] : current.filter((key) => key !== repoKey);
+    const prefs = await call(tracer.setPrefs({ showAllRequests }));
+    if (prefs) state = { ...state, prefs };
+    render();
+    return;
+  }
   const key = el.dataset.pref as keyof Prefs | undefined;
   if (!key) return;
   const value = el instanceof HTMLInputElement && el.type === "checkbox" ? el.checked : Number(el.value);

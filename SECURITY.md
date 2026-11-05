@@ -8,7 +8,7 @@ Open a GitHub issue for a vulnerability in this repository. Do not paste tokens,
 
 ## What the app stores
 
-The Electron app keeps one JSON file, `pipelinetracer.json`, under the app data folder (`~/Library/Application Support/Pipeline Tracer/data/` on macOS, `%APPDATA%\Pipeline Tracer\data\` on Windows). It holds the refresh interval, the pipeline window, whether the merge button is available, whether the panel reopens where you left it, the Windows start-at-login choice, and the failure ids already announced. Those are settings, not credentials. On macOS the file is written with mode `600`.
+The Electron app keeps one JSON file, `pipelinetracer.json`, under the app data folder (`~/Library/Application Support/Pipeline Tracer/data/` on macOS, `%APPDATA%\Pipeline Tracer\data\` on Windows). It holds the refresh interval, the pipeline window, whether the merge button is available, which repos list every open request, whether the panel reopens where you left it, the Windows start-at-login choice, and the failure ids already announced. Those are settings, not credentials. On macOS the file is written with mode `600`.
 
 The legacy Swift app in `menubar/` kept the same settings in the UserDefaults domain `com.kris.pipelinetracer`.
 
