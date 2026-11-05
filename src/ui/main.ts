@@ -329,8 +329,7 @@ function ring(p: Pipeline): string {
   const r = 11.5;
   const circ = 2 * Math.PI * r;
   const n = slices.length;
-  const gap = n > 1 ? circ * 0.035 : 0;
-  const sliceLen = n > 0 ? circ / n - gap : 0;
+  const sliceLen = n > 0 ? circ / n : 0;
   const phase = ((Date.now() % 1100) / 1100) * 1.1;
   const arcs = slices
     .map((slice, i) => {

@@ -67,7 +67,7 @@ export function trayIconPng(
       const index = Math.min(n - 1, Math.floor(angle * n));
       const local = angle * n - index;
       const slice = slices[index];
-      if (n > 1 && local > 0.94) return [r, g, b, trackAlpha * 0.35];
+      // Finished jobs and the filled part of a running job meet. Gray is only work that has not started.
       const filled = slice.kind === "done" || local <= slice.fill;
       let rr = r;
       let gg = g;
