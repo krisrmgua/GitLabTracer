@@ -993,7 +993,8 @@ function render(): void {
   const key = screenKey();
   const same = key === lastScreenKey;
   lastScreenKey = key;
-  content.classList.toggle("workspace", !!s && ui.screen === "mr" && !!ui.mr);
+  // MR detail uses the same padded content area as other screens.
+  content.classList.remove("workspace");
 
   const scrolls = new Map<string, [number, number]>();
   content.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
