@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyJobUpdate,
   browserURL,
+  githubCanMerge,
   githubMergeMethod,
   githubPullStatus,
   githubRepoName,
@@ -28,6 +29,8 @@ import {
   parseDate,
   parseGitHubPull,
   parseGitHubRun,
+  parseMergeRequest,
+  parseMergeRequestGraphQL,
   pipelineKey,
   progressState,
   projectIDFromGraphQL,
@@ -304,13 +307,54 @@ check("GitHub pull request status", async () => {
   assert.equal(numberLabel(parsed), "#8");
   assert.equal(mrKey(parsed), "github:7:8");
   assert.ok(isReady(parsed));
+  assert.equal(parsed.canMerge, true);
   assert.equal(parsed.project, "example/app");
+  assert.equal(
+    parseGitHubPull({ ...node, repository: { databaseId: 7, nameWithOwner: "example/app", isArchived: false, viewerPermission: "READ" } })?.canMerge,
+    false,
+  );
+  assert.equal(
+    parseGitHubPull({ ...node, repository: { databaseId: 7, nameWithOwner: "example/app", isArchived: false, viewerPermission: "WRITE" } })?.canMerge,
+    true,
+  );
+  assert.equal(githubCanMerge("ADMIN"), true);
+  assert.equal(githubCanMerge("MAINTAIN"), true);
+  assert.equal(githubCanMerge("WRITE"), true);
+  assert.equal(githubCanMerge("TRIAGE"), false);
+  assert.equal(githubCanMerge("READ"), false);
+  assert.equal(
+    parseMergeRequestGraphQL({
+      iid: "12",
+      title: "Fix",
+      webUrl: "https://gitlab.com/group/repo/-/merge_requests/12",
+      draft: false,
+      detailedMergeStatus: "MERGEABLE",
+      userPermissions: { canMerge: false },
+      project: { id: "gid://gitlab/Project/9", fullPath: "group/repo", archived: false },
+    })?.canMerge,
+    false,
+  );
+  assert.equal(
+    parseMergeRequest({
+      project_id: 9,
+      iid: 12,
+      title: "Fix",
+      web_url: "https://gitlab.com/group/repo/-/merge_requests/12",
+      detailed_merge_status: "mergeable",
+      user: { can_merge: false },
+    })?.canMerge,
+    false,
+  );
   assert.equal(parseGitHubPull({ ...node, url: "https://example.com/pull/8" }), null);
   assert.equal(parseGitHubPull({ ...node, repository: { databaseId: 7, nameWithOwner: "example/app", isArchived: true } }), null);
   assert.equal(githubMergeMethod(true, true, true), "merge");
   assert.equal(githubMergeMethod(false, true, true), "squash");
   assert.equal(githubMergeMethod(false, false, true), "rebase");
   assert.equal(githubMergeMethod(false, false, false), null);
+  const readOnlyOutcome = await merge(
+    makeMergeRequest({ host: "github", projectID: 7, iid: 8, title: "Add login", project: "example/app", url: "https://github.com/example/app/pull/8", mergeStatus: "mergeable", pipelineStatus: "success", canMerge: false }),
+  );
+  assert.deepEqual(readOnlyOutcome, { ok: false, message: "no write access to merge" });
   const outcome = await merge(
     makeMergeRequest({ host: "github", projectID: 7, iid: 8, title: "Add login", project: "not a repo", url: "https://github.com/example/app/pull/8", mergeStatus: "mergeable", pipelineStatus: "success" }),
   );

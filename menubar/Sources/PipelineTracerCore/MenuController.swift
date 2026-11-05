@@ -409,7 +409,7 @@ public final class MenuController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             sub.addItem(disabled("Pipeline: \(mr.pipelineStatus ?? "none") · \(mr.isReady ? "ready" : mr.draft ? "draft" : mr.mergeStatus)", toneFor(pipeline: mr.pipelineStatus)))
             sub.addItem(.separator())
             sub.addItem(actionItem("Open in browser") { self.open(mr.url) })
-            if mr.isReady && PipelineTracerPrefs.mergeButton {
+            if mr.isReady && mr.canMerge && PipelineTracerPrefs.mergeButton {
                 sub.addItem(actionItem("Merge…") { self.confirmMerge(mr) })
             }
             sub.addItem(actionItem(mr.host == .github ? "Close PR…" : "Close MR…") { self.confirmClose(mr) })
