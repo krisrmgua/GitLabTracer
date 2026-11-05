@@ -733,7 +733,7 @@ function renderLog(p: Pipeline, job: Job): string {
   const copyOff = ui.loadingLog || !ui.logText ? " disabled" : "";
   return `${head}${tabBar}
     <div class="log-tools">
-      <input id="log-search" class="search" type="search" placeholder="Search logs…" spellcheck="false" value="${esc(ui.search)}" />
+      <input id="log-search" class="search" type="search" placeholder="Search logs…" spellcheck="false" />
       <button type="button" class="inline" data-act="copy-log"${copyOff}>${icon("copy", 10)}Copy</button>
       <button type="button" class="inline" data-act="open" data-url="${esc(jobURL)}">${icon("external", 10)}${service}</button>
     </div>
@@ -1006,6 +1006,8 @@ function render(): void {
 
   const changed = setHTML(content, s ? renderScreen(s) : empty("Connecting…"));
   if (changed) {
+    const search = document.getElementById("log-search");
+    if (search instanceof HTMLInputElement) search.value = ui.search;
     content.querySelectorAll<HTMLElement>("[data-scroll]").forEach((el) => {
       const saved = scrolls.get(el.dataset.scroll!);
       if (saved && (same || el.hasAttribute("data-sticky"))) [el.scrollTop, el.scrollLeft] = saved;

@@ -5,6 +5,7 @@ import {
   applyJobUpdate,
   browserURL,
   combineMergeRequests,
+  descriptionSummary,
   githubCanMerge,
   githubMergeMethod,
   githubPullStatus,
@@ -259,8 +260,10 @@ check("GitHub runs stay separate from GitLab", () => {
   assert.equal(githubStatus("completed", "failure"), "failed");
   assert.equal(githubStatus("completed", "cancelled"), "canceled");
   assert.equal(githubStatus("completed", "action_required"), "manual");
-  assert.ok(browserURL("https://github.com/owner/repo/actions/runs/1")?.includes("github.com"));
-  assert.ok(browserURL("https://gitlab.com/group/repo/-/pipelines/1")?.includes("gitlab.com"));
+  assert.equal(new URL(browserURL("https://github.com/owner/repo/actions/runs/1") ?? "").hostname, "github.com");
+  assert.equal(new URL(browserURL("https://gitlab.com/group/repo/-/pipelines/1") ?? "").hostname, "gitlab.com");
+  assert.equal(descriptionSummary("Visible\n<!-- secret -->"), "Visible");
+  assert.equal(descriptionSummary("Before\n<!<!-- hidden -->-- hidden -->\nAfter"), "Before\n\nAfter");
   assert.equal(browserURL("http://github.com/owner/repo"), null);
   assert.equal(browserURL("https://evil.github.com.example/owner/repo"), null);
   assert.equal(browserURL("https://user@github.com/owner/repo"), null);
