@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { app } from "electron";
 import {
+  applyJobUpdate,
   isActiveStatus,
+  omitHiddenRequests,
   isFailed,
   isReady,
   isRunning,
@@ -13,6 +15,7 @@ import {
   refLabel,
   unresolvedFailures,
   type ActivityEvent,
+  type Job,
   type MergeRequest,
   type NotificationKind,
   type Pipeline,
@@ -49,6 +52,10 @@ export class Controller {
   private timer: NodeJS.Timeout | null = null;
   /** Merges and closes run one at a time. */
   private work: Promise<void> = Promise.resolve();
+  /** Set when a refresh is already running, so the follow-up poll is not dropped. */
+  private refreshQueued = false;
+  /** Requests just merged or closed, kept out of the open list until this epoch ms. */
+  private hiddenRequests = new Map<string, number>();
 
   constructor(
     private store: Store,
@@ -85,6 +92,23 @@ export class Controller {
     this.timer = null;
   }
 
+  /**
+   * The panel loaded jobs ahead of the poll. Keep that result, so leaving the
+   * detail does not put a finished pipeline back under In progress.
+   */
+  noteJobs(key: string, jobs: Job[]): void {
+    const next = applyJobUpdate(this.pipelines, key, jobs);
+    if (!next) return;
+    const prev = this.pipelines.find((p) => pipelineKey(p) === key);
+    const settled = next.find((p) => pipelineKey(p) === key);
+    this.pipelines = next;
+    if (settled && this.cardPipeline && pipelineKey(this.cardPipeline) === key) {
+      this.cardPipeline = isRunning(settled) ? settled : (next.find(isRunning) ?? next[0] ?? null);
+    }
+    if (prev && settled && isFailed(settled) && !isFailed(prev)) this.announceFailures(next);
+    this.onChange();
+  }
+
   prefsChanged(before: Prefs, after: Prefs): void {
     if (before.refreshSeconds !== after.refreshSeconds) this.schedule();
     if (before.refreshSeconds !== after.refreshSeconds || before.pipelineHours !== after.pipelineHours) {
@@ -94,7 +118,10 @@ export class Controller {
   }
 
   async refresh(): Promise<void> {
-    if (this.refreshing) return;
+    if (this.refreshing) {
+      this.refreshQueued = true;
+      return;
+    }
     this.refreshing = true;
     this.onChange();
     try {
@@ -102,6 +129,10 @@ export class Controller {
     } finally {
       this.refreshing = false;
       this.onChange();
+      if (this.refreshQueued) {
+        this.refreshQueued = false;
+        void this.refresh();
+      }
     }
   }
 
@@ -213,6 +244,9 @@ export class Controller {
       }),
     );
 
+    const now = Date.now();
+    for (const [key, until] of this.hiddenRequests) if (until <= now) this.hiddenRequests.delete(key);
+    mrs = omitHiddenRequests(mrs, this.hiddenRequests, now);
     this.notifyMergeChanges(mrs);
     this.notifyChanges(pipes);
     this.mrs = mrs;
@@ -398,8 +432,18 @@ export class Controller {
         err ?? mr.title,
         "mergeRequest",
       );
+      if (outcome.ok) {
+        // Drop it before the host's open list catches up, and keep a stale response from putting it back.
+        this.hiddenRequests.set(mrKey(mr), Date.now() + 60_000);
+        this.mrs = this.mrs.filter((item) => mrKey(item) !== mrKey(mr));
+      }
       this.onChange();
       await this.refresh();
+      // The branch pipeline usually appears a few seconds after the merge API returns.
+      if (outcome.ok && successStatus === "merged") {
+        setTimeout(() => void this.refresh(), 3_000);
+        setTimeout(() => void this.refresh(), 8_000);
+      }
     });
   }
 }
