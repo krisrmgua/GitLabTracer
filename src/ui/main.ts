@@ -811,9 +811,10 @@ function renderWorkspace(s: TracerState, mr: MergeRequest): string {
       </div>`,
     ),
   ];
+  const showMerge = s.prefs.mergeButton && mr.canMerge;
   const mergeOff = !isReady(mr) || busy || ui.mrLoading || error != null;
   const closeOff = busy || ui.mrLoading;
-  const mergeButton = s.prefs.mergeButton
+  const mergeButton = showMerge
     ? `<button type="button" class="action primary" data-act="merge-ask"${mergeOff ? " disabled" : ""}>${isReady(mr) ? "" : icon("lock", 10)}${s.merging === key ? "Merging…" : "Merge"}</button>`
     : "";
   const closeLabel = s.closing === key ? "Closing…" : gh ? "Close PR" : "Close MR";
@@ -840,10 +841,10 @@ function renderWorkspace(s: TracerState, mr: MergeRequest): string {
     ${panel(checks)}
     <div style="display:flex;gap:8px">
       ${mergeButton}
-      <button type="button" class="action${s.prefs.mergeButton ? " fit" : ""}" data-act="close-ask"${closeOff ? " disabled" : ""}>${closeLabel}</button>
+      <button type="button" class="action${showMerge ? " fit" : ""}" data-act="close-ask"${closeOff ? " disabled" : ""}>${closeLabel}</button>
     </div>
     ${
-      s.prefs.mergeButton
+      showMerge
         ? `<div class="note ${isReady(mr) ? "ok-text" : "bad-text"}" style="font-weight:500">${esc(
             isReady(mr) ? "Ready to merge." : `Merge unavailable: ${mrState(mr)}.`,
           )}</div>`

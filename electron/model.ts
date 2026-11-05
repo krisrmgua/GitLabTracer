@@ -67,7 +67,7 @@ export async function githubLogin(): Promise<string | null> {
 /** One GraphQL query: open MRs you authored, with the archived flag inlined. REST is the fallback. */
 export async function fetchOpenMergeRequests(onFailure: () => void): Promise<MergeRequest[]> {
   const query =
-    "query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt project{id fullPath archived} headPipeline{status}}}}}";
+    "query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt userPermissions{canMerge} project{id fullPath archived} headPipeline{status}}}}}";
   const data = await glabGraphQL(query);
   const nodes = arr(obj(obj(data?.currentUser)?.authoredMergeRequests)?.nodes);
   if (!nodes) return fetchOpenMergeRequestsREST(onFailure);
@@ -271,7 +271,7 @@ async function loadGitHubJobs(p: Pipeline): Promise<Job[] | null> {
 export async function fetchOpenPullRequests(): Promise<MergeRequest[] | null> {
   if (!(await githubLogin())) return null;
   const query =
-    "query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid repository{databaseId nameWithOwner isArchived}statusCheckRollup{state}}}}}";
+    "query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid repository{databaseId nameWithOwner isArchived viewerPermission}statusCheckRollup{state}}}}}";
   const data = await ghGraphQL(query);
   const nodes = arr(obj(obj(data?.viewer)?.pullRequests)?.nodes);
   if (!nodes) return null;
@@ -345,6 +345,7 @@ async function githubPullDetail(mr: MergeRequest): Promise<MrDetail | null> {
     sourceBranch: str(head?.ref),
     targetBranch: str(base?.ref),
     sha,
+    canMerge: mr.canMerge,
   });
   return { request, body: str(item.body), author: str(obj(item.user)?.login), jobs };
 }
@@ -364,9 +365,11 @@ export function mrDetail(mr: MergeRequest): Promise<MrDetail | null> {
 
 /** Merges only if the host still reports the request as ready (never trusts the list's stale state). */
 export async function merge(mr: MergeRequest): Promise<Outcome> {
+  if (!mr.canMerge) return fail("no write access to merge");
   if (mr.host === "github") return mergeGitHub(mr);
   const fresh = obj(await glabJSON(`projects/${mr.projectID}/merge_requests/${mr.iid}`));
   if (!fresh) return fail("couldn't load MR");
+  if (obj(fresh.user)?.can_merge === false) return fail("no write access to merge");
   const status = str(fresh.detailed_merge_status) || "unknown";
   if (fresh.state !== "opened" || fresh.draft === true || status !== "mergeable") return fail(`not ready: ${status}`);
   const sha = str(fresh.sha);

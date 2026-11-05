@@ -49,6 +49,8 @@ export interface MergeRequest {
   sourceBranch: string;
   targetBranch: string;
   sha: string;
+  /** False when the signed-in user lacks permission to merge into the target repository/branch. */
+  canMerge: boolean;
 }
 
 export interface ActivityEvent {
@@ -101,6 +103,7 @@ export function makeMergeRequest(
     sourceBranch: "",
     targetBranch: "",
     sha: "",
+    canMerge: true,
     ...m,
   };
 }
@@ -409,6 +412,7 @@ export function parseMergeRequest(m: Json): MergeRequest | null {
   const url = str(m.web_url);
   if (pid == null || iid == null || !title || !url) return null;
   const pipe = obj(m.head_pipeline)?.status;
+  const user = obj(m.user);
   return makeMergeRequest({
     projectID: pid,
     iid,
@@ -422,6 +426,7 @@ export function parseMergeRequest(m: Json): MergeRequest | null {
     sourceBranch: str(m.source_branch),
     targetBranch: str(m.target_branch),
     sha: str(m.sha),
+    canMerge: user?.can_merge !== false,
   });
 }
 
@@ -436,6 +441,7 @@ export function parseMergeRequestGraphQL(node: Json): MergeRequest | null {
   const url = str(node.webUrl);
   if (pid == null || !path || iid == null || !title || !url) return null;
   const pipe = obj(node.headPipeline)?.status;
+  const perms = obj(node.userPermissions);
   return makeMergeRequest({
     projectID: pid,
     iid,
@@ -449,6 +455,7 @@ export function parseMergeRequestGraphQL(node: Json): MergeRequest | null {
     sourceBranch: str(node.sourceBranch),
     targetBranch: str(node.targetBranch),
     sha: str(node.diffHeadSha),
+    canMerge: perms?.canMerge !== false,
   });
 }
 
@@ -579,6 +586,12 @@ export function githubMergeMethod(allowMerge: boolean, allowSquash: boolean, all
   return null;
 }
 
+/** True when GitHub viewerPermission grants write/merge access on the target repository. */
+export function githubCanMerge(permission: unknown): boolean {
+  if (typeof permission !== "string" || !permission) return true;
+  return permission === "ADMIN" || permission === "MAINTAIN" || permission === "WRITE";
+}
+
 export interface GitHubPullStatus {
   draft: boolean;
   mergeStatus: string;
@@ -641,6 +654,7 @@ export function parseGitHubPull(node: Json): MergeRequest | null {
     sourceBranch: str(node.headRefName),
     targetBranch: str(node.baseRefName),
     sha: str(node.headRefOid),
+    canMerge: githubCanMerge(repo.viewerPermission),
   });
 }
 

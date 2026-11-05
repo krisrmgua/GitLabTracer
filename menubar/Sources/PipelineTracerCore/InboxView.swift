@@ -731,7 +731,7 @@ struct InboxView: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        if PipelineTracerPrefs.mergeButton {
+                        if PipelineTracerPrefs.mergeButton && mr.canMerge {
                             Button {
                                 state.confirmingMerge = true
                             } label: {
@@ -755,9 +755,9 @@ struct InboxView: View {
                         }
                         .buttonStyle(DeckActionStyle())
                         .disabled(model.merging != nil || model.closing != nil || state.mrLoading)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .fixedSize(horizontal: PipelineTracerPrefs.mergeButton && mr.canMerge, vertical: false)
                     }
-                    if PipelineTracerPrefs.mergeButton {
+                    if PipelineTracerPrefs.mergeButton && mr.canMerge {
                         Text(mr.isReady ? "Ready to merge." : "Merge unavailable: \(mrState(mr)).")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(mr.isReady ? .green : .red)

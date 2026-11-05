@@ -15,6 +15,7 @@ struct MergeRequest: Equatable {
     var sourceBranch: String = ""
     var targetBranch: String = ""
     var sha: String = ""
+    var canMerge: Bool = true
 
     var key: String { host == .github ? "github:\(projectID):\(iid)" : "\(projectID):\(iid)" }
     var numberLabel: String { host == .github ? "#\(iid)" : "!\(iid)" }
@@ -32,7 +33,7 @@ enum PipelineModel {
     /// One GraphQL query: open MRs you authored, with archived project flag inlined.
     static func fetchOpenMergeRequests(onFailure: () -> Void = {}) -> [MergeRequest] {
         let query = """
-        query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt project{id fullPath archived} headPipeline{status}}}}}
+        query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt userPermissions{canMerge} project{id fullPath archived} headPipeline{status}}}}}
         """
         guard let data = Shell.glabGraphQL(query),
               let user = data["currentUser"] as? [String: Any],
@@ -89,6 +90,7 @@ enum PipelineModel {
               let title = m["title"] as? String,
               let url = m["web_url"] as? String else { return nil }
         let pipe = (m["head_pipeline"] as? [String: Any])?["status"] as? String
+        let canMerge = ((m["user"] as? [String: Any])?["can_merge"] as? Bool) != false
         return MergeRequest(
             projectID: pid, iid: iid, title: title,
             project: projectPath(fromWebURL: url), url: url,
@@ -98,7 +100,8 @@ enum PipelineModel {
             updated: parseDate(m["updated_at"] as? String),
             sourceBranch: m["source_branch"] as? String ?? "",
             targetBranch: m["target_branch"] as? String ?? "",
-            sha: m["sha"] as? String ?? ""
+            sha: m["sha"] as? String ?? "",
+            canMerge: canMerge
         )
     }
 
@@ -112,6 +115,7 @@ enum PipelineModel {
               let title = node["title"] as? String,
               let url = node["webUrl"] as? String else { return nil }
         let pipe = (node["headPipeline"] as? [String: Any])?["status"] as? String
+        let canMerge = ((node["userPermissions"] as? [String: Any])?["canMerge"] as? Bool) != false
         return MergeRequest(
             projectID: pid, iid: iid, title: title,
             project: path, url: url,
@@ -121,7 +125,8 @@ enum PipelineModel {
             updated: parseDate(node["updatedAt"] as? String),
             sourceBranch: node["sourceBranch"] as? String ?? "",
             targetBranch: node["targetBranch"] as? String ?? "",
-            sha: node["diffHeadSha"] as? String ?? ""
+            sha: node["diffHeadSha"] as? String ?? "",
+            canMerge: canMerge
         )
     }
 
@@ -160,9 +165,13 @@ enum PipelineModel {
 
     /// Merges only if the host still reports the request as ready (never trusts the list's stale state).
     static func merge(_ mr: MergeRequest) -> MergeResult {
+        if !mr.canMerge { return .failed("no write access to merge") }
         if mr.host == .github { return mergeGitHub(mr) }
         guard let fresh = Shell.glabJSON("projects/\(mr.projectID)/merge_requests/\(mr.iid)") as? [String: Any] else {
             return .failed("couldn't load MR")
+        }
+        if ((fresh["user"] as? [String: Any])?["can_merge"] as? Bool) == false {
+            return .failed("no write access to merge")
         }
         let status = (fresh["detailed_merge_status"] as? String) ?? "unknown"
         if (fresh["state"] as? String) != "opened" || (fresh["draft"] as? Bool) == true || status != "mergeable" {
@@ -645,6 +654,11 @@ extension PipelineModel {
         return nil
     }
 
+    static func githubCanMerge(_ permission: Any?) -> Bool {
+        guard let perm = permission as? String, !perm.isEmpty else { return true }
+        return perm == "ADMIN" || perm == "MAINTAIN" || perm == "WRITE"
+    }
+
     /// Maps GitHub's mergeable, review, and check rollup onto the words the request row already uses.
     static func githubPullStatus(isDraft: Bool, mergeable: String?, reviewDecision: String?, checks: String?) -> GitHubPullStatus {
         let pipeline: String? = {
@@ -673,7 +687,7 @@ extension PipelineModel {
     /// Open pull requests you created. One GraphQL call, up to 30, newest update first.
     static func fetchOpenPullRequests() -> Result<[MergeRequest], LoadError> {
         guard githubLogin() != nil else { return .failure(.unavailable) }
-        let query = "query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid repository{databaseId nameWithOwner isArchived}statusCheckRollup{state}}}}}"
+        let query = "query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid repository{databaseId nameWithOwner isArchived viewerPermission}statusCheckRollup{state}}}}}"
         guard let data = Shell.ghGraphQL(query),
               let viewer = data["viewer"] as? [String: Any],
               let connection = viewer["pullRequests"] as? [String: Any],
@@ -697,7 +711,8 @@ extension PipelineModel {
             updated: parseDate(node["updatedAt"] as? String),
             sourceBranch: node["headRefName"] as? String ?? "",
             targetBranch: node["baseRefName"] as? String ?? "",
-            sha: node["headRefOid"] as? String ?? ""
+            sha: node["headRefOid"] as? String ?? "",
+            canMerge: githubCanMerge(repo["viewerPermission"])
         )
     }
 
@@ -736,7 +751,8 @@ extension PipelineModel {
             updated: parseDate(item["updated_at"] as? String),
             sourceBranch: head?["ref"] as? String ?? "",
             targetBranch: base?["ref"] as? String ?? "",
-            sha: sha
+            sha: sha,
+            canMerge: mr.canMerge
         )
         let author = (item["user"] as? [String: Any])?["login"] as? String ?? ""
         return (fresh, item["body"] as? String ?? "", author, jobs)

@@ -173,6 +173,9 @@ public final class StatusChecks {
         precondition(PipelineModel.githubMergeMethod(allowMerge: false, allowSquash: true, allowRebase: true) == "squash")
         precondition(PipelineModel.githubMergeMethod(allowMerge: false, allowSquash: false, allowRebase: true) == "rebase")
         precondition(PipelineModel.githubMergeMethod(allowMerge: false, allowSquash: false, allowRebase: false) == nil)
+        if case .failed(let message) = PipelineModel.merge(MergeRequest(host: .github, projectID: 7, iid: 8, title: "Add login", project: "example/app", url: "https://github.com/example/app/pull/8", draft: false, mergeStatus: "mergeable", pipelineStatus: "success", updated: nil, canMerge: false)) {
+            precondition(message == "no write access to merge")
+        } else { precondition(false) }
         if case .failed(let message) = PipelineModel.merge(MergeRequest(host: .github, projectID: 7, iid: 8, title: "Add login", project: "not a repo", url: "https://github.com/example/app/pull/8", draft: false, mergeStatus: "mergeable", pipelineStatus: "success", updated: nil)) {
             precondition(message == "couldn't load pull request")
         } else { precondition(false) }

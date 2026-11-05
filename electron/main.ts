@@ -249,7 +249,7 @@ function wireIpc(): void {
 
   ipcMain.handle("tracer:merge", (_e, key: unknown, sha: unknown) => {
     const mr = findRequest(key, sha);
-    if (!mr || !store.prefs.mergeButton) return false;
+    if (!mr || !mr.canMerge || !store.prefs.mergeButton) return false;
     controller.merge(mr);
     return true;
   });
