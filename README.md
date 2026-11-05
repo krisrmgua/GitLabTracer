@@ -344,7 +344,16 @@ Both apps install to `~/Applications/Pipeline Tracer.app` with the same bundle i
 
 ## Version
 
-The shipping version is `package.json` → `version` (currently **0.3.0**). The panel footer shows it as `v0.3.0`. Bump that field before each release you push and package; Electron Builder embeds it so `app.getVersion()` matches.
+The shipping version lives in `package.json` → `version`. Electron Builder embeds it, so the panel footer/header (`vX.Y.Z`) matches `app.getVersion()`.
+
+**Do not bump the version in feature PRs.** Every merge to `main` runs [`.github/workflows/bump-version.yml`](.github/workflows/bump-version.yml), which:
+
+1. Bumps the **patch** (for example `0.3.9` → `0.3.10`)
+2. Opens a short-lived release PR and squash-merges it as `chore: release X.Y.Z [skip ci]`
+3. Tags `vX.Y.Z` on `main`
+
+The `[skip ci]` marker stops the bump job from looping on its own commit.
+
 
 ## License
 
