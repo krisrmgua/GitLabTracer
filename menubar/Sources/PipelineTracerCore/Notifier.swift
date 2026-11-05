@@ -65,13 +65,29 @@ enum Notifier {
     }
 
     static func post(_ title: String, subtitle: String, body: String, thread: String,
-                     important: Bool = false, url: String, kind: Kind) {
+                     important: Bool = false, url: String, kind: Kind,
+                     completion: @escaping () -> Void = {}) {
         let content = content(title, subtitle: subtitle, body: body, thread: thread,
                               important: important, url: url, kind: kind)
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { NSLog("Pipeline Tracer notification delivery failed: %@", error.localizedDescription) }
+            DispatchQueue.main.async { completion() }
         }
+    }
+
+    /// Electron live alerts. Args after `--notify`: title, subtitle, body, thread, url, kind, important.
+    static func postFromCommandLine() -> Bool {
+        guard let index = CommandLine.arguments.firstIndex(of: "--notify") else { return false }
+        let rest = Array(CommandLine.arguments.dropFirst(index + 1))
+        guard rest.count == 7, let kind = Kind(rawValue: rest[5]) else { return false }
+        let url = Shell.browserURL(rest[4])?.absoluteString ?? ""
+        post(rest[0], subtitle: rest[1], body: rest[2], thread: rest[3],
+             important: rest[6] == "1", url: url, kind: kind) {
+            print("Pipeline Tracer notification queued.")
+            exit(0)
+        }
+        return true
     }
 
     /// Statuses that mean "not finished yet".
