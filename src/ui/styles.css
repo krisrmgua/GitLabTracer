@@ -128,11 +128,6 @@ button {
   padding: 12px;
 }
 
-#content.workspace {
-  padding: 0;
-  height: 100%;
-}
-
 #foot {
   flex: 0 0 auto;
   display: flex;
