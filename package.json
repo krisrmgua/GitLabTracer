@@ -20,7 +20,7 @@
     "build:notify-helper": "bash menubar/make-app.sh",
     "build": "npm run typecheck && npm run build:ui && npm run build:electron && npm run icons",
     "start": "npm run build && electron .",
-    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && PIPELINE_TRACER_DEV=1 electron .\"",
+    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && PIPELINE_TRACER_DEV=1 PIPELINE_TRACER_DEV_SERVER=http://127.0.0.1:5173 electron .\"",
     "pack:mac": "npm run build && npm run build:notify-helper && electron-builder --mac",
     "pack:win": "npm run build && electron-builder --win",
     "pack": "npm run build && npm run build:notify-helper && electron-builder --mac --win"

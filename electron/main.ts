@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Controller } from "./controller";
 import { trayIconPng } from "./icons";
 import {
@@ -37,9 +38,31 @@ let store: Store;
 let controller: Controller;
 let lastTrayKey = "";
 
-function panelUrl(): string {
-  if (isDev) return "http://127.0.0.1:5173";
-  return `file://${path.join(app.getAppPath(), "dist", "index.html")}`;
+let panelAddress = "";
+
+/** Dev server URL from the environment. Only a loopback Vite address is accepted. */
+function loopbackDevUrl(raw: string | undefined): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw ?? "");
+  } catch {
+    throw new Error("Dev mode needs the Vite server URL in the environment.");
+  }
+  const loopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  const web = parsed.protocol === "https:" || parsed.protocol === "http:";
+  if (!loopback || !web) throw new Error("The dev panel only loads from the loopback Vite server.");
+  return parsed.href;
+}
+
+function loadPanel(win: BrowserWindow): void {
+  if (isDev) {
+    panelAddress = loopbackDevUrl(process.env.PIPELINE_TRACER_DEV_SERVER);
+    void win.loadURL(panelAddress);
+    return;
+  }
+  const file = path.join(app.getAppPath(), "dist", "index.html");
+  panelAddress = pathToFileURL(file).href;
+  void win.loadFile(file);
 }
 
 function createPanel(): BrowserWindow {
@@ -61,7 +84,7 @@ function createPanel(): BrowserWindow {
       sandbox: true,
     },
   });
-  void win.loadURL(panelUrl());
+  loadPanel(win);
   // Clicking away closes the panel, like the Swift popover.
   win.on("blur", () => {
     if (!isDev) win.hide();
@@ -70,7 +93,7 @@ function createPanel(): BrowserWindow {
   // Links inside the panel never navigate the panel itself.
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
-    if (url !== panelUrl()) e.preventDefault();
+    if (url !== panelAddress) e.preventDefault();
   });
   return win;
 }
