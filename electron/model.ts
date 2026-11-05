@@ -1,6 +1,8 @@
 import {
+  combineMergeRequests,
   githubMergeMethod,
   githubRepoName,
+  gitlabProjectPath,
   jsonInt,
   makeMergeRequest,
   mergeRequestIID,
@@ -18,6 +20,7 @@ import {
   type MergeRequest,
   type MrDetail,
   type Pipeline,
+  type TrackedRepo,
 } from "./logic";
 import { ghGET, ghGraphQL, glabGraphQL, glabJSON, parseObject, run } from "./shell";
 
@@ -64,14 +67,42 @@ export async function githubLogin(): Promise<string | null> {
   return name;
 }
 
+const GITLAB_MR_FIELDS =
+  "iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt author{username} userPermissions{canMerge} project{id fullPath archived} headPipeline{status}";
+
 /** One GraphQL query: open MRs you authored, with the archived flag inlined. REST is the fallback. */
-export async function fetchOpenMergeRequests(onFailure: () => void): Promise<MergeRequest[]> {
-  const query =
-    "query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{iid title webUrl draft detailedMergeStatus sourceBranch targetBranch diffHeadSha updatedAt userPermissions{canMerge} project{id fullPath archived} headPipeline{status}}}}}";
+export async function fetchOpenMergeRequests(onFailure: () => void, includeProjects: string[] = []): Promise<MergeRequest[]> {
+  const query = `query{currentUser{authoredMergeRequests(state:opened,first:30,sort:UPDATED_DESC){nodes{${GITLAB_MR_FIELDS}}}}}`;
   const data = await glabGraphQL(query);
   const nodes = arr(obj(obj(data?.currentUser)?.authoredMergeRequests)?.nodes);
-  if (!nodes) return fetchOpenMergeRequestsREST(onFailure);
-  const mrs = nodes.map(parseMergeRequestGraphQL).filter((m): m is MergeRequest => m != null);
+  const authored = nodes
+    ? await Promise.all(nodes.map(parseMergeRequestGraphQL).filter((m): m is MergeRequest => m != null).map(recheckGitLabMergeStatus))
+    : await fetchOpenMergeRequestsREST(onFailure);
+  const extra = (await Promise.all(includeProjects.map(fetchGitLabProjectMergeRequests))).flat();
+  return combineMergeRequests([authored, extra]);
+}
+
+/** Open merge requests in one project, whoever opened them. */
+async function fetchGitLabProjectMergeRequests(path: string): Promise<MergeRequest[]> {
+  const project = gitlabProjectPath(path);
+  if (!project) return [];
+  const query = `query{project(fullPath:${JSON.stringify(project)}){archived mergeRequests(state:opened,first:20,sort:UPDATED_DESC){nodes{${GITLAB_MR_FIELDS}}}}}`;
+  const data = await glabGraphQL(query);
+  const projectNode = obj(data?.project);
+  if (projectNode && projectNode.archived !== true) {
+    const nodes = arr(obj(projectNode.mergeRequests)?.nodes);
+    if (nodes) {
+      const mrs = nodes.map(parseMergeRequestGraphQL).filter((m): m is MergeRequest => m != null);
+      return Promise.all(mrs.map(recheckGitLabMergeStatus));
+    }
+  }
+  const list = arr(
+    await glabJSON(
+      `projects/${encodeURIComponent(project)}/merge_requests?state=opened&scope=all&per_page=20&order_by=updated_at&sort=desc`,
+    ),
+  );
+  if (!list) return [];
+  const mrs = list.map(parseMergeRequest).filter((m): m is MergeRequest => m != null);
   return Promise.all(mrs.map(recheckGitLabMergeStatus));
 }
 
@@ -217,6 +248,40 @@ async function githubRepos(): Promise<GitHubRepo[] | null> {
   return repos;
 }
 
+/** Membership projects, newest activity first. One page, so a very long membership list is truncated. */
+export async function listGitLabRepos(): Promise<TrackedRepo[] | null> {
+  const list = arr(
+    await glabJSON(
+      "projects?membership=true&simple=true&archived=false&order_by=last_activity_at&sort=desc&per_page=100",
+    ),
+  );
+  if (!list) return null;
+  const repos: TrackedRepo[] = [];
+  for (const item of list) {
+    const name = gitlabProjectPath(str(item.path_with_namespace));
+    if (!name) continue;
+    repos.push({ host: "gitlab", key: `gitlab:${name}`, name });
+  }
+  return repos;
+}
+
+/** Repos you can access, most recently pushed first. Separate from the smaller pipeline poll. */
+export async function listGitHubRepos(): Promise<TrackedRepo[] | null> {
+  const r = await ghGET(
+    "user/repos?per_page=100&sort=pushed&direction=desc&affiliation=owner,collaborator,organization_member",
+  );
+  const list = arr(r.json);
+  if (r.status !== 0 || !list) return null;
+  const repos: TrackedRepo[] = [];
+  for (const item of list) {
+    if (item.archived === true) continue;
+    const name = githubRepoName(str(item.full_name));
+    if (!name) continue;
+    repos.push({ host: "github", key: `github:${name}`, name });
+  }
+  return repos;
+}
+
 /** Repos pushed inside the window, capped at 12. If none were, the 8 most recently pushed. */
 async function githubReposForWindow(hours: number): Promise<GitHubRepo[] | null> {
   const all = await githubRepos();
@@ -267,16 +332,31 @@ async function loadGitHubJobs(p: Pipeline): Promise<Job[] | null> {
     .sort((a, b) => a.id - b.id);
 }
 
-/** Open pull requests you created. One GraphQL call, up to 30, newest update first. */
-export async function fetchOpenPullRequests(): Promise<MergeRequest[] | null> {
+const GITHUB_PR_FIELDS =
+  "number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid author{login} repository{databaseId nameWithOwner isArchived viewerPermission}statusCheckRollup{state}";
+
+/** Open pull requests you created, plus every open pull in repos you opted into. */
+export async function fetchOpenPullRequests(includeRepos: string[] = []): Promise<MergeRequest[] | null> {
   if (!(await githubLogin())) return null;
-  const query =
-    "query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isDraft mergeable reviewDecision updatedAt headRefName baseRefName headRefOid repository{databaseId nameWithOwner isArchived viewerPermission}statusCheckRollup{state}}}}}";
+  const query = `query{viewer{pullRequests(states:OPEN,first:30,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${GITHUB_PR_FIELDS}}}}}`;
   const data = await ghGraphQL(query);
   const nodes = arr(obj(obj(data?.viewer)?.pullRequests)?.nodes);
   if (!nodes) return null;
-  const pulls = nodes.map(parseGitHubPull).filter((m): m is MergeRequest => m != null);
-  return Promise.all(pulls.map(recheckGitHubMergeStatus));
+  const mine = nodes.map(parseGitHubPull).filter((m): m is MergeRequest => m != null);
+  const extra = (await Promise.all(includeRepos.map(fetchGitHubRepoPulls))).flat();
+  return Promise.all(combineMergeRequests([mine, extra]).map(recheckGitHubMergeStatus));
+}
+
+/** Open pull requests in one repository, whoever opened them. */
+async function fetchGitHubRepoPulls(name: string): Promise<MergeRequest[]> {
+  const repo = githubRepoName(name);
+  if (!repo) return [];
+  const [owner, repoName] = repo.split("/");
+  const query = `query{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(repoName)}){pullRequests(states:OPEN,first:20,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${GITHUB_PR_FIELDS}}}}}`;
+  const data = await ghGraphQL(query);
+  const nodes = arr(obj(obj(data?.repository)?.pullRequests)?.nodes);
+  if (!nodes) return [];
+  return nodes.map(parseGitHubPull).filter((m): m is MergeRequest => m != null);
 }
 
 /** GitHub often returns mergeable=null until a second read of the same pull. */

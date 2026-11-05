@@ -11,8 +11,10 @@ import {
   isSuccess,
   mrKey,
   numberLabel,
+  parseTrackedRepoKey,
   pipelineKey,
   refLabel,
+  sameStrings,
   unresolvedFailures,
   type ActivityEvent,
   type Job,
@@ -20,6 +22,7 @@ import {
   type NotificationKind,
   type Pipeline,
   type Prefs,
+  type TrackedRepo,
   type TracerState,
 } from "./logic";
 import * as model from "./model";
@@ -56,6 +59,10 @@ export class Controller {
   private refreshQueued = false;
   /** Requests just merged or closed, kept out of the open list until this epoch ms. */
   private hiddenRequests = new Map<string, number>();
+  private gitlabRepos: TrackedRepo[] = [];
+  private githubRepos: TrackedRepo[] = [];
+  private gitlabLogin: string | null = null;
+  private githubLogin: string | null = null;
 
   constructor(
     private store: Store,
@@ -74,6 +81,9 @@ export class Controller {
       merging: this.merging,
       closing: this.closing,
       prefs: this.store.prefs,
+      repos: [...this.gitlabRepos, ...this.githubRepos].sort(
+        (a, b) => a.name.localeCompare(b.name) || a.host.localeCompare(b.host),
+      ),
       platform: process.platform,
       version: app.getVersion(),
       cli: { glab: toolPath("glab"), gh: toolPath("gh") },
@@ -111,7 +121,11 @@ export class Controller {
 
   prefsChanged(before: Prefs, after: Prefs): void {
     if (before.refreshSeconds !== after.refreshSeconds) this.schedule();
-    if (before.refreshSeconds !== after.refreshSeconds || before.pipelineHours !== after.pipelineHours) {
+    if (
+      before.refreshSeconds !== after.refreshSeconds ||
+      before.pipelineHours !== after.pipelineHours ||
+      !sameStrings(before.showAllRequests, after.showAllRequests)
+    ) {
       void this.refresh();
     }
     this.onChange();
@@ -160,6 +174,8 @@ export class Controller {
       glab ? model.currentUser() : Promise.resolve(null),
       gh ? model.githubLogin() : Promise.resolve(null),
     ]);
+    this.gitlabLogin = gitlabUser;
+    this.githubLogin = githubUser;
     if (!gitlabUser && !githubUser) {
       this.error = "Can’t reach GitLab or GitHub. Check your connection and glab or gh sign-in. Showing last received activity.";
       return;
@@ -169,13 +185,24 @@ export class Controller {
     const markFailed = () => {
       gitlabFailedFlag = true;
     };
+    const showAll = this.store.prefs.showAllRequests
+      .map((key) => parseTrackedRepoKey(key))
+      .filter((repo): repo is { host: "gitlab" | "github"; name: string } => repo != null);
+    const gitlabProjects = showAll.filter((repo) => repo.host === "gitlab").map((repo) => repo.name);
+    const githubNames = showAll.filter((repo) => repo.host === "github").map((repo) => repo.name);
     const gitlabWork = gitlabUser
-      ? Promise.all([model.fetchOpenMergeRequests(markFailed), model.fetchPipelines(hours, markFailed)])
-      : Promise.resolve([[], []] as [MergeRequest[], Pipeline[]]);
+      ? Promise.all([
+          model.fetchOpenMergeRequests(markFailed, gitlabProjects),
+          model.fetchPipelines(hours, markFailed),
+          model.listGitLabRepos(),
+        ])
+      : Promise.resolve([[], [], null] as [MergeRequest[], Pipeline[], TrackedRepo[] | null]);
     const githubWork = githubUser
-      ? Promise.all([model.fetchGitHubPipelines(hours), model.fetchOpenPullRequests()])
-      : Promise.resolve([null, null] as [Pipeline[] | null, MergeRequest[] | null]);
-    const [[glMRs, glPipes], [ghPipes, ghPulls]] = await Promise.all([gitlabWork, githubWork]);
+      ? Promise.all([model.fetchGitHubPipelines(hours), model.fetchOpenPullRequests(githubNames), model.listGitHubRepos()])
+      : Promise.resolve([null, null, null] as [Pipeline[] | null, MergeRequest[] | null, TrackedRepo[] | null]);
+    const [[glMRs, glPipes, glRepos], [ghPipes, ghPulls, ghRepos]] = await Promise.all([gitlabWork, githubWork]);
+    if (glRepos) this.gitlabRepos = glRepos;
+    if (ghRepos) this.githubRepos = ghRepos;
 
     let mrs = glMRs;
     let gitlabPipes = glPipes;
@@ -353,6 +380,8 @@ export class Controller {
     if (!this.baselineDone) return;
     for (const mr of mrs) {
       if (!isReady(mr)) continue;
+      const login = mr.host === "github" ? this.githubLogin : this.gitlabLogin;
+      if (mr.author && login && mr.author.toLowerCase() !== login.toLowerCase()) continue;
       if (this.mrs.some((old) => mrKey(old) === mrKey(mr) && isReady(old))) continue;
       this.publish(
         "Ready to merge",

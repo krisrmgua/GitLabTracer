@@ -1,6 +1,6 @@
 # Pipeline Tracer
 
-Pipeline Tracer is a tray app for **macOS** and **Windows** that tracks your own CI activity: GitLab.com merge requests and pipelines, GitHub Actions runs on repos you recently pushed, GitHub pull requests you opened, failed jobs, and a merge button that re-checks the host before it merges.
+Pipeline Tracer is a tray app for **macOS** and **Windows** that tracks your CI activity: GitLab.com merge requests and pipelines, GitHub Actions runs on repos you recently pushed, GitHub pull requests you opened, failed jobs, and a merge button that re-checks the host before it merges. Preferences can show every open request in a chosen repo. The merge button stays hidden when you cannot merge.
 
 The panel is a dark activity inbox. Failures stay at the top until a later pipeline for that same commit succeeds. Clicking away closes the panel. The next open returns to the overview unless you turn on **Reopen where I left off**.
 
@@ -242,7 +242,7 @@ The overview groups activity into:
 
 - **Attention needed**: the latest failed pipeline on a branch. A newer successful pipeline for the same commit clears it. A success on a different commit does not. On GitHub, only the same workflow clears it.
 - **Active**: pipelines that are running, queued, waiting, or need a manual action.
-- **Requests**: GitLab merge requests and GitHub pull requests you opened, with draft, blocked, and ready state. A `#` number is GitHub. A `!` number is GitLab.
+- **Requests**: GitLab merge requests and GitHub pull requests you opened, with draft, blocked, and ready state. A `#` number is GitHub. A `!` number is GitLab. Preferences can switch a repo to every open request. The author is shown on those rows.
 - **Recent successes**: opens a list of passed pipelines in the history window plus merges from this session. Click one to see its jobs.
 - **Canceled & skipped**: collapsed until you open it.
 
@@ -254,7 +254,7 @@ Open a request for its description, source and target branches, author, and pipe
 
 ### Merge and Close
 
-**Merge** asks you to confirm, then reloads the request and only continues when it is still open, not a draft, and mergeable, and the source SHA still matches what you were looking at. GitLab sends that SHA with `PUT` through `glab`. GitHub sends it with `PUT` through `gh` and uses merge, squash, or rebase depending on what the repo allows. One merge runs at a time. A notification never merges for you. The button follows **Show merge actions**.
+**Merge** asks you to confirm, then reloads the request and only continues when it is still open, not a draft, and mergeable, and the source SHA still matches what you were looking at. GitLab sends that SHA with `PUT` through `glab`. GitHub sends it with `PUT` through `gh` and uses merge, squash, or rebase depending on what the repo allows. One merge runs at a time. A notification never merges for you. The button follows **Show merge actions**, and it stays hidden when you do not have permission to merge into that repo. Close stays available.
 
 **Close** sits beside Merge. It always asks you to confirm, then closes the merge request or pull request. It does not delete the source branch.
 
@@ -271,7 +271,8 @@ The bell in the panel lists this session's events, filtered by **All**, **Pipeli
 | Reopen where I left off | Off. Closing the panel returns to the overview. |
 | Refresh interval | 60 seconds. Choices: 10, 20, 30, 40, 50, 60. |
 | Completion history | 2 hours. Choices: 1, 2, 4, 6, 8, 12, 24. Covers GitLab pipelines and GitHub Actions runs. Open requests are not cut off by it. |
-| Show merge actions | On. Covers GitLab merge requests and GitHub pull requests. |
+| Show merge actions | On. Covers GitLab merge requests and GitHub pull requests. Hidden on a request you cannot merge. |
+| Requests, per repo | Off. Lists requests you opened. On lists every open request in that repo (up to 20). The list is the 100 GitLab projects you belong to with the newest activity, and the 100 GitHub repos you can access that were pushed most recently. |
 | Open at login | On. macOS and Windows both use the Electron login item. |
 
 Preferences are saved in `pipelinetracer.json` in the app data folder:
@@ -287,11 +288,11 @@ They are not credentials. Delete the file to reset.
 
 On each refresh, Tracer asks GitLab.com through `glab` for:
 
-- open merge requests you created (one GraphQL query, up to 30; archived projects dropped)
+- open merge requests you created (one GraphQL query, up to 30; archived projects dropped). A repo switched on in Preferences adds that project's open merge requests, up to 20, in one more query
 - your recent pipelines across projects (`GET /pipelines`, one call instead of one per project)
 - jobs only for the status-card pipeline, newly failed pipelines, pipelines that just finished, or when you open one (cached while status and SHA stay the same)
 
-GitHub has no single "all of my workflow runs" endpoint. Tracer asks `gh` for the 30 repos you pushed most recently, keeps that list for 10 minutes, then loads the 20 newest Actions runs on the ones pushed inside the history window (at most 12 repos). If nothing was pushed in that window, it checks the 8 most recently pushed repos instead. A scheduled workflow on a repo outside that set doesn't appear until the repo is pushed again. Open pull requests you created come from one GraphQL call, up to 30.
+GitHub has no single "all of my workflow runs" endpoint. Tracer asks `gh` for the 30 repos you pushed most recently, keeps that list for 10 minutes, then loads the 20 newest Actions runs on the ones pushed inside the history window (at most 12 repos). If nothing was pushed in that window, it checks the 8 most recently pushed repos instead. A scheduled workflow on a repo outside that set doesn't appear until the repo is pushed again. Open pull requests you created come from one GraphQL call, up to 30. A repo switched on in Preferences adds that repository's open pull requests, up to 20.
 
 Your GitLab username and GitHub login are cached for an hour.
 

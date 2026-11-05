@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyJobUpdate,
   browserURL,
+  combineMergeRequests,
   githubCanMerge,
   githubMergeMethod,
   githubPullStatus,
@@ -27,6 +28,7 @@ import {
   omitHiddenRequests,
   requestJustFinished,
   parseDate,
+  parseTrackedRepoKey,
   parseGitHubPull,
   parseGitHubRun,
   parseMergeRequest,
@@ -216,6 +218,26 @@ check("preferences fall back to defaults", () => {
   assert.equal(prefs.rememberPlace, true);
   assert.equal(sanitizePrefs(null).rememberPlace, false);
   assert.equal(sanitizePrefs(null).mergeButton, true);
+  assert.deepEqual(sanitizePrefs(null).showAllRequests, []);
+  const scoped = sanitizePrefs({
+    showAllRequests: ["github:example/app", "gitlab:group/sub/repo", "github:example/app", "nope", "github:../x"],
+  });
+  assert.deepEqual(scoped.showAllRequests, ["github:example/app", "gitlab:group/sub/repo"]);
+  assert.equal(parseTrackedRepoKey("gitlab:group/sub/repo")?.name, "group/sub/repo");
+  assert.equal(parseTrackedRepoKey('github:owner/name";injection'), null);
+  const mine = makeMergeRequest({ projectID: 1, iid: 2, title: "Mine", project: "example/app", host: "github" });
+  const theirs = makeMergeRequest({
+    projectID: 1,
+    iid: 2,
+    title: "Mine",
+    project: "example/app",
+    host: "github",
+    author: "ada",
+  });
+  const other = makeMergeRequest({ projectID: 1, iid: 9, title: "Other", project: "example/app", host: "github", author: "ada" });
+  const combined = combineMergeRequests([[mine], [theirs, other]]);
+  assert.equal(combined.length, 2);
+  assert.equal(combined.find((mr) => mr.iid === 2)?.author, "ada");
 });
 
 check("GraphQL helpers", () => {
