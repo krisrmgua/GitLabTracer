@@ -231,7 +231,9 @@ function wireIpc(): void {
   ipcMain.handle("tracer:jobs", async (_e, key: unknown, force: unknown) => {
     const p = findPipeline(key);
     if (!p) return null;
-    return model.jobsForPipeline(p, force === true);
+    const jobs = await model.jobsForPipeline(p, force === true);
+    if (jobs && typeof key === "string") controller.noteJobs(key, jobs);
+    return jobs;
   });
 
   ipcMain.handle("tracer:log", async (_e, key: unknown, job: Job) => {

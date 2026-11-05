@@ -107,6 +107,32 @@ export function makeMergeRequest(
 
 export const mrKey = (mr: MergeRequest): string =>
   mr.host === "github" ? `github:${mr.projectID}:${mr.iid}` : `${mr.projectID}:${mr.iid}`;
+
+/**
+ * Drops requests this app just merged or closed. A stale open list can keep
+ * returning them for a few seconds; `hiddenUntil` is the epoch ms to stop hiding.
+ */
+export function omitHiddenRequests(
+  mrs: MergeRequest[],
+  hiddenUntil: ReadonlyMap<string, number>,
+  now = Date.now(),
+): MergeRequest[] {
+  return mrs.filter((mr) => {
+    const until = hiddenUntil.get(mrKey(mr));
+    return until == null || until <= now;
+  });
+}
+
+/** True when this request was merged or closed moments ago, so the panel can leave its page. */
+export function requestJustFinished(events: ActivityEvent[], mr: MergeRequest, now = Date.now()): boolean {
+  return events.some(
+    (event) =>
+      event.url === mr.url &&
+      (event.status === "merged" || event.status === "canceled") &&
+      now - event.date >= 0 &&
+      now - event.date < 20_000,
+  );
+}
 export const numberLabel = (mr: MergeRequest): string => (mr.host === "github" ? `#${mr.iid}` : `!${mr.iid}`);
 export const isReady = (mr: MergeRequest): boolean => !mr.draft && mr.mergeStatus === "mergeable";
 
@@ -151,6 +177,27 @@ export function settlePipeline<T extends Pipeline>(p: T): T {
   if (statuses.every((s) => s === "canceled" || s === "cancelled")) return { ...p, status: "canceled" };
   if (statuses.every((s) => s === "skipped")) return { ...p, status: "skipped" };
   return { ...p, status: "success" };
+}
+
+/** Job statuses only. A duration tick is not a new result. */
+export function jobStatusKey(jobs: Job[]): string {
+  return jobs.map((j) => `${j.id}:${j.status}`).join(",");
+}
+
+/**
+ * Jobs just loaded for one pipeline. Returns a new list when that changes the
+ * settled status or any job status, so the overview can leave "in progress"
+ * without waiting for the next poll. Null when the list would look the same.
+ */
+export function applyJobUpdate(pipelines: Pipeline[], key: string, jobs: Job[]): Pipeline[] | null {
+  const index = pipelines.findIndex((p) => pipelineKey(p) === key);
+  if (index < 0) return null;
+  const prev = pipelines[index];
+  const next = settlePipeline({ ...prev, jobs });
+  if (prev.status === next.status && jobStatusKey(prev.jobs) === jobStatusKey(next.jobs)) return null;
+  const copy = pipelines.slice();
+  copy[index] = next;
+  return copy;
 }
 
 /** `refs/merge-requests/15/head` -> 15. Branch and main pipelines are null. */

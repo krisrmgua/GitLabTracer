@@ -2,6 +2,7 @@
 // pull-request status, without calling GitLab or GitHub. Port of StatusChecks.swift.
 import assert from "node:assert/strict";
 import {
+  applyJobUpdate,
   browserURL,
   githubMergeMethod,
   githubPullStatus,
@@ -22,6 +23,8 @@ import {
   normalizePipelineStatus,
   notificationContent,
   numberLabel,
+  omitHiddenRequests,
+  requestJustFinished,
   parseDate,
   parseGitHubPull,
   parseGitHubRun,
@@ -61,6 +64,43 @@ check("finished jobs clear a pipeline the list still calls running", () => {
   assert.equal(settlePipeline(mid).status, "running");
   const broken = pipeline("running", [job("success", 1), job("failed", 2)]);
   assert.equal(settlePipeline(broken).status, "failed");
+});
+
+check("a detail view that finds the job finished updates the list immediately", () => {
+  const stuck = pipeline("running", [job("running", 1)]);
+  const key = pipelineKey(stuck);
+  const updated = applyJobUpdate([stuck], key, [job("success", 1)]);
+  assert.ok(updated);
+  assert.equal(updated![0].status, "success");
+  assert.equal(updated![0].jobs[0].status, "success");
+  assert.equal(applyJobUpdate(updated!, key, [job("success", 1)]), null);
+  const still = applyJobUpdate([stuck], key, [job("running", 1)]);
+  assert.equal(still, null);
+});
+
+check("a merged request leaves the open list and the panel", () => {
+  const mr = makeMergeRequest({
+    projectID: 4,
+    iid: 30,
+    title: "Ship it",
+    project: "kkube/recipes",
+    url: "https://gitlab.com/kkube/recipes/-/merge_requests/30",
+  });
+  const now = 5_000_000;
+  const hidden = new Map([[mrKey(mr), now + 60_000]]);
+  assert.equal(omitHiddenRequests([mr], hidden, now).length, 0);
+  assert.equal(omitHiddenRequests([mr], hidden, now + 60_000).length, 1);
+  const event = {
+    id: "1",
+    title: "Merge complete",
+    detail: "kkube/recipes !30",
+    status: "merged",
+    url: mr.url,
+    date: now - 1_000,
+  };
+  assert.equal(requestJustFinished([event], mr, now), true);
+  assert.equal(requestJustFinished([{ ...event, date: now - 30_000 }], mr, now), false);
+  assert.equal(requestJustFinished([{ ...event, url: "https://example.com" }], mr, now), false);
 });
 
 check("a running job fills its slice before it finishes", () => {

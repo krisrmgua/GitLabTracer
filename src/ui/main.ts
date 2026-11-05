@@ -4,6 +4,7 @@ import {
   cleanLog,
   descriptionSummary,
   formatDuration,
+  applyJobUpdate,
   groupSameChange,
   groupTitle,
   isDone,
@@ -19,6 +20,7 @@ import {
   numberLabel,
   pipelineKey,
   progressState,
+  requestJustFinished,
   ringSlices,
   refLabel,
   relative,
@@ -259,10 +261,11 @@ const duration = (j: Job, fallback: string): string => (j.duration != null ? for
 const requestNoun = (mr: MergeRequest): string => (mr.host === "github" ? "pull request" : "merge request");
 
 function derived(s: TracerState) {
-  const failureGroups = groupSameChange(unresolvedFailures(s.pipelines));
-  const activeGroups = groupSameChange(s.pipelines.filter((p) => isRunning(p) || p.status === "manual"));
-  const finished = s.pipelines.filter(isSuccess);
-  const other = s.pipelines.filter((p) => ["canceled", "cancelled", "skipped"].includes(p.status));
+  const pipelines = s.pipelines.map((p) => settlePipeline(p));
+  const failureGroups = groupSameChange(unresolvedFailures(pipelines));
+  const activeGroups = groupSameChange(pipelines.filter((p) => isRunning(p) || p.status === "manual"));
+  const finished = pipelines.filter(isSuccess);
+  const other = pipelines.filter((p) => ["canceled", "cancelled", "skipped"].includes(p.status));
   const mergedEvents = s.events.filter((e) => e.status === "merged");
   return { failureGroups, activeGroups, finished, other, mergedEvents };
 }
@@ -760,13 +763,14 @@ function renderGroup(): string {
   const sections = ps.map((p) => {
     const key = pipelineKey(p);
     const jobs = ui.groupJobs.get(key) ?? p.jobs;
+    const shown = settlePipeline({ ...p, jobs });
     const iid = mergeRequestIID(p);
     return `<div class="stack">
       <div style="display:flex;align-items:center;gap:8px">
         <span class="section-label" style="font-size:11px">${iid == null ? "Branch" : `MR !${iid}`}</span>
         <span class="mono note">#${p.id}</span>
         <span style="flex:1"></span>
-        ${badge(statusTitle(p.status), p.status)}
+        ${badge(statusTitle(shown.status), shown.status)}
         ${openButton(p.url, `Open pipeline on ${serviceName(p)}`)}
       </div>
       <div class="s">${esc(iid == null ? p.ref : `refs/merge-requests/${iid}/head`)}</div>
@@ -1068,9 +1072,24 @@ async function loadJobs(p: Pipeline, quiet: boolean): Promise<void> {
   const jobs = await call(tracer.jobs(pipelineKey(p), quiet || isRunning(p)));
   if (token !== requestToken) return;
   ui.loadingJobs = false;
-  if (jobs) ui.jobs = jobs;
-  else if (!quiet) ui.loadError = `Couldn’t load jobs. Check ${serviceName(p)} access or open in browser.`;
+  if (jobs) {
+    ui.jobs = jobs;
+    rememberJobs(p, jobs);
+  } else if (!quiet) ui.loadError = `Couldn’t load jobs. Check ${serviceName(p)} access or open in browser.`;
   render();
+}
+
+/** Keeps a just-loaded result on the shared list, so Back is already up to date. */
+function rememberJobs(p: Pipeline, jobs: Job[]): void {
+  if (!state) return;
+  const key = pipelineKey(p);
+  const next = applyJobUpdate(state.pipelines, key, jobs);
+  if (!next) return;
+  state = { ...state, pipelines: next };
+  const settled = next.find((item) => pipelineKey(item) === key);
+  if (!settled) return;
+  if (ui.pipeline && pipelineKey(ui.pipeline) === key) ui.pipeline = settled;
+  ui.group = ui.group.map((item) => (pipelineKey(item) === key ? settled : item));
 }
 
 function selectPipeline(p: Pipeline): void {
@@ -1094,7 +1113,9 @@ async function selectGroup(pipelines: Pipeline[]): Promise<void> {
   if (token !== requestToken) return;
   ui.loadingJobs = false;
   results.forEach((jobs, i) => {
-    if (jobs) ui.groupJobs.set(pipelineKey(pipelines[i]), jobs);
+    if (!jobs) return;
+    ui.groupJobs.set(pipelineKey(pipelines[i]), jobs);
+    rememberJobs(pipelines[i], jobs);
   });
   if (results.some((r) => r == null)) ui.loadError = "Couldn’t load every pipeline. Open the missing one in the browser.";
   render();
@@ -1152,8 +1173,10 @@ async function toggleHistory(key: string): Promise<void> {
   const jobs = await call(tracer.jobs(key, false));
   if (ui.expandedHistory !== key) return;
   ui.historyLoading = null;
-  if (jobs) ui.historyJobs.set(key, jobs);
-  else ui.historyError = `Couldn’t load completed jobs. Open the pipeline in ${serviceName(p)}.`;
+  if (jobs) {
+    ui.historyJobs.set(key, jobs);
+    rememberJobs(p, jobs);
+  } else ui.historyError = `Couldn’t load completed jobs. Open the pipeline in ${serviceName(p)}.`;
   render();
 }
 
@@ -1232,6 +1255,7 @@ function sync(fresh: boolean): void {
     const live = s.mrs.find((m) => mrKey(m) === mrKey(current));
     ui.mrMissing = !live;
     if (live) ui.mr = { ...live, pipelineStatus: live.pipelineStatus ?? current.pipelineStatus };
+    else if (ui.screen === "mr" && requestJustFinished(s.events, current)) returnToOverview();
   }
 }
 
