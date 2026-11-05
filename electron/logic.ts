@@ -850,9 +850,20 @@ export function cleanLog(text: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/** Drops HTML comments, including ones that only appear after an earlier comment is removed. */
+function stripHtmlComments(text: string): string {
+  let current = text;
+  let previous = "";
+  while (current !== previous) {
+    previous = current;
+    current = current.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  return current;
+}
+
 /** First few lines of a description, with HTML comments and table rules dropped. */
 export function descriptionSummary(text: string): string {
-  const clean = text.replace(/<!--[\s\S]*?-->/g, "");
+  const clean = stripHtmlComments(text);
   const lines: string[] = [];
   for (const line of clean.split("\n")) {
     const value = line.trim();
