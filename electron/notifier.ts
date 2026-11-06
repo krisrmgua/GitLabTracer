@@ -75,7 +75,8 @@ async function sendViaSwiftPreview(): Promise<PreviewResult | null> {
   if (!bin) return null;
   try {
     const { stdout, stderr } = await execFileAsync(bin, ["--notification-preview"], {
-      timeout: 12_000,
+      // Helper stays alive through the 6s auto-dismiss window.
+      timeout: 20_000,
       encoding: "utf8",
     });
     if (/Enable Pipeline Tracer notifications/i.test(stderr || "")) {
@@ -147,6 +148,15 @@ function showElectron(content: ReturnType<typeof notificationContent>): void {
   n.on("close", release);
   n.on("failed", release);
   n.show();
+  // macOS Alert-style prefs leave banners until dismissed; close after a short linger.
+  setTimeout(() => {
+    try {
+      n.close();
+    } catch {
+      /* already gone */
+    }
+    release();
+  }, 6000);
 }
 
 /** macOS live alerts use the same UserNotifications helper as Send test. */
@@ -156,7 +166,7 @@ function sendLiveViaSwift(content: ReturnType<typeof notificationContent>): bool
   execFile(
     bin,
     ["--notify", content.subtitle, "", content.body, content.thread, content.url, content.kind, content.sound ? "1" : "0"],
-    { timeout: 12_000 },
+    { timeout: 20_000 },
     (err) => {
       if (err) showElectron(content);
     },
@@ -220,7 +230,14 @@ export async function preview(): Promise<PreviewResult> {
     n.show();
     // macOS often never fires "show"; treat as delivered unless "failed" arrives.
     await new Promise((r) => setTimeout(r, 600));
-    setTimeout(() => live.delete(n), 8000);
+    setTimeout(() => {
+      try {
+        n.close();
+      } catch {
+        /* already gone */
+      }
+      live.delete(n);
+    }, 6000);
 
     if (!failed) {
       return { ok: true, message: "Test notification sent." };

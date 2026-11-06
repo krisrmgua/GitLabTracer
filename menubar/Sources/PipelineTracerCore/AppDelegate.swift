@@ -25,7 +25,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
                     exit(2)
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Notifier.autoDismissSeconds + 8) {
                 fputs("Notification timed out.\n", stderr)
                 exit(1)
             }
@@ -41,9 +41,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificat
                 }
                 Notifier.preview()
                 print("Pipeline Tracer test notification queued.")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { exit(0) }
+                // Stay alive until auto-dismiss clears the banner.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Notifier.autoDismissSeconds + 1.5) { exit(0) }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Notifier.autoDismissSeconds + 8) {
                 fputs("Notification preview timed out.\n", stderr)
                 exit(1)
             }

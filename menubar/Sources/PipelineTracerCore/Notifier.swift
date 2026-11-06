@@ -3,10 +3,22 @@ import UserNotifications
 
 /// macOS notifications for pipeline events: a job finishing, a pipeline finishing, a new pipeline.
 enum Notifier {
+    /// Clear the banner after this many seconds so Alert-style prefs do not leave it stuck.
+    static let autoDismissSeconds: TimeInterval = 6
+
     enum Kind: String, CaseIterable {
         case pipeline, logs, mergeRequest, readyMergeRequest
         var actionTitle: String {
             switch self { case .pipeline: return "View pipeline"; case .logs: return "View logs"; case .mergeRequest: return "View MR"; case .readyMergeRequest: return "Review MR" }
+        }
+    }
+
+    /// Remove a delivered banner; getDeliveredNotifications waits for the async clear to land.
+    static func scheduleAutoDismiss(identifier: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + autoDismissSeconds) {
+            let center = UNUserNotificationCenter.current()
+            center.removeDeliveredNotifications(withIdentifiers: [identifier])
+            center.getDeliveredNotifications { _ in }
         }
     }
 
@@ -69,9 +81,11 @@ enum Notifier {
                      completion: @escaping () -> Void = {}) {
         let content = content(title, subtitle: subtitle, body: body, thread: thread,
                               important: important, url: url, kind: kind)
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        let identifier = UUID().uuidString
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error { NSLog("Pipeline Tracer notification delivery failed: %@", error.localizedDescription) }
+            else { scheduleAutoDismiss(identifier: identifier) }
             DispatchQueue.main.async { completion() }
         }
     }
@@ -85,7 +99,10 @@ enum Notifier {
         post(rest[0], subtitle: rest[1], body: rest[2], thread: rest[3],
              important: rest[6] == "1", url: url, kind: kind) {
             print("Pipeline Tracer notification queued.")
-            exit(0)
+            // Keep the helper alive until scheduleAutoDismiss runs, then exit.
+            DispatchQueue.main.asyncAfter(deadline: .now() + autoDismissSeconds + 1.5) {
+                exit(0)
+            }
         }
         return true
     }
